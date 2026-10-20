@@ -763,6 +763,11 @@ function wireHostShellEvents(): void {
 // ============================================================================
 // BOOTSTRAP: PARTICIPANT PORTAL (gpulse.web.app) vs GDE HOST APP (gde.web.app)
 // ============================================================================
+const yearEl = document.getElementById('creatorCopyrightYear');
+if (yearEl) {
+  yearEl.textContent = String(new Date().getFullYear());
+}
+
 if (isParticipantPortal()) {
   applySundialTheme(getSavedTheme(), false);
   initParticipantPortal(escapeHtml, showToast);

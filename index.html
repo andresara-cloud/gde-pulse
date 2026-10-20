@@ -75,17 +75,56 @@
     <header id="appHeader" class="topbar" hidden>
       <div class="topbar-inner">
         <div class="topbar-brand">
-          <!-- Official Google Developer Experts < > Bracket Logo SVG -->
-          <svg class="gde-logo-svg" width="46" height="30" viewBox="0 0 92 60" fill="none" aria-hidden="true">
-            <!-- Top-left terracotta/red arm -->
-            <rect x="6" y="21" width="32" height="14" rx="7" transform="rotate(-35 6 21)" fill="#c95b3c" />
-            <!-- Bottom-left periwinkle blue arm -->
-            <rect x="14" y="21" width="32" height="14" rx="7" transform="rotate(35 14 21)" fill="#6d83f2" />
-            <!-- Bottom-right warm gold arm -->
-            <rect x="46" y="39" width="32" height="14" rx="7" transform="rotate(-35 46 39)" fill="#dfb13b" />
-            <!-- Top-right green arm -->
-            <rect x="54" y="3" width="32" height="14" rx="7" transform="rotate(35 54 3)" fill="#66a85b" />
-          </svg>
+          <!-- Official Google Developer Experts < > Bracket Logo SVG + Creator Hover Pop-up -->
+          <div class="gde-logo-hover-wrap" tabindex="0" aria-label="About creator Andres Sara">
+            <svg class="gde-logo-svg" width="48" height="32" viewBox="0 0 96 64" fill="none" aria-hidden="true">
+              <!-- Bottom-left periwinkle blue arm -->
+              <path d="M14 32 L36 50" stroke="#6d83f2" stroke-width="13" stroke-linecap="round" />
+              <!-- Top-left terracotta/red arm -->
+              <path d="M14 32 L36 14" stroke="#c95b3c" stroke-width="13" stroke-linecap="round" />
+              <!-- Bottom-right warm gold arm -->
+              <path d="M82 32 L60 50" stroke="#dfb13b" stroke-width="13" stroke-linecap="round" />
+              <!-- Top-right green arm -->
+              <path d="M60 14 L82 32" stroke="#66a85b" stroke-width="13" stroke-linecap="round" />
+            </svg>
+
+            <div class="gde-creator-popover" role="tooltip">
+              <div class="gde-creator-popover-inner">
+                <a
+                  href="https://andresara.io"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="gde-creator-photo-link"
+                  title="Visit andresara.io"
+                >
+                  <img
+                    src="/andre-sara.jpg"
+                    width="50"
+                    height="50"
+                    alt="Andre Sara"
+                    class="gde-creator-photo"
+                  />
+                </a>
+                <div class="gde-creator-info">
+                  <strong class="gde-creator-title">
+                    Created by Andres Sara &copy; <span id="creatorCopyrightYear">2026</span>
+                  </strong>
+                  <a
+                    href="https://andresara.io"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="gde-creator-domain"
+                  >
+                    andresara.io &nearr;
+                  </a>
+                  <p class="gde-creator-cta">
+                    Want to learn more about Andre?
+                    <a href="https://andresara.io" target="_blank" rel="noopener noreferrer">Here's the link.</a>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
           <div>
             <div class="topbar-title-row">
               <span class="topbar-title">Google Developer Experts</span>
