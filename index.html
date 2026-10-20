@@ -75,8 +75,15 @@
     <header id="appHeader" class="topbar" hidden>
       <div class="topbar-inner">
         <div class="topbar-brand">
-          <!-- Official Google Developer Experts < > Bracket Logo SVG + Creator Hover Pop-up -->
-          <div class="gde-logo-hover-wrap" tabindex="0" aria-label="About creator Andres Sara">
+          <!-- Official Google Developer Experts < > Bracket Logo SVG (Click to open Creator Modal) -->
+          <button
+            type="button"
+            id="btnOpenCreatorModal"
+            class="gde-logo-btn"
+            aria-haspopup="dialog"
+            aria-controls="creatorModal"
+            aria-label="Learn More"
+          >
             <svg class="gde-logo-svg" width="48" height="32" viewBox="0 0 96 64" fill="none" aria-hidden="true">
               <!-- Bottom-left periwinkle blue arm -->
               <path d="M14 32 L36 50" stroke="#6d83f2" stroke-width="13" stroke-linecap="round" />
@@ -87,44 +94,8 @@
               <!-- Top-right green arm -->
               <path d="M60 14 L82 32" stroke="#66a85b" stroke-width="13" stroke-linecap="round" />
             </svg>
-
-            <div class="gde-creator-popover" role="tooltip">
-              <div class="gde-creator-popover-inner">
-                <a
-                  href="https://andresara.io"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="gde-creator-photo-link"
-                  title="Visit andresara.io"
-                >
-                  <img
-                    src="/andre-sara.jpg"
-                    width="50"
-                    height="50"
-                    alt="Andre Sara"
-                    class="gde-creator-photo"
-                  />
-                </a>
-                <div class="gde-creator-info">
-                  <strong class="gde-creator-title">
-                    Created by Andres Sara &copy; <span id="creatorCopyrightYear">2026</span>
-                  </strong>
-                  <a
-                    href="https://andresara.io"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="gde-creator-domain"
-                  >
-                    andresara.io &nearr;
-                  </a>
-                  <p class="gde-creator-cta">
-                    Want to learn more about Andre?
-                    <a href="https://andresara.io" target="_blank" rel="noopener noreferrer">Here's the link.</a>
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
+            <span class="topbar-icon-tooltip gde-logo-tooltip" aria-hidden="true">Learn More</span>
+          </button>
           <div>
             <div class="topbar-title-row">
               <span class="topbar-title">Google Developer Experts</span>
@@ -214,6 +185,36 @@
         </div>
       </div>
     </header>
+
+    <!-- CREATOR MODAL (STANDARDIZED LIKE THEME SUNDIAL MODAL, OPENED ON GDE ICON CLICK) -->
+    <dialog id="creatorModal" class="modal theme-sundial-modal" closedby="any" aria-labelledby="creatorModalHeading">
+      <div class="modal-card theme-sundial-modal-card">
+        <button type="button" id="btnCloseCreatorModal" class="btn-icon sundial-close-btn" aria-label="Close">&times;</button>
+        <div class="gde-creator-modal-layout">
+          <img
+            src="/andre-sara.jpg"
+            width="100"
+            height="100"
+            alt="Andre Sara"
+            class="gde-creator-modal-photo"
+          />
+          <div class="sundial-copy">
+            <h2 id="creatorModalHeading">
+              Created by Andre Sara &copy; <span id="creatorCopyrightYear">2026</span>
+            </h2>
+            <p class="muted gde-creator-modal-copy">
+              Want to learn more about Andre? Here's the link:
+              <a
+                href="https://andresara.io"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="gde-creator-single-link"
+              >andresara.io &nearr;</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </dialog>
 
     <!-- THEME SUNDIAL MODAL (OPENED FROM TOP BAR THEME BUTTON, SIMILAR TO ADD EVENT) -->
     <dialog id="themeSundialModal" class="modal theme-sundial-modal" closedby="any" aria-labelledby="themeSundialHeading">

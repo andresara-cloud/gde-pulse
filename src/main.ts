@@ -581,6 +581,13 @@ function wireHostShellEvents(): void {
     }
   });
 
+  $('btnOpenCreatorModal').addEventListener('click', () => {
+    $<HTMLDialogElement>('creatorModal').showModal();
+  });
+  $('btnCloseCreatorModal').addEventListener('click', () => {
+    $<HTMLDialogElement>('creatorModal').close();
+  });
+
   $('btnOpenGdeProfile').addEventListener('click', () => {
     renderGdeDirectoryCards(currentProfile);
     $<HTMLDialogElement>('gdeProfileModal').showModal();

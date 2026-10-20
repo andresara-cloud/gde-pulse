@@ -442,14 +442,23 @@ code {
   gap: 12px;
 }
 
-.gde-logo-hover-wrap {
+.gde-logo-btn {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 4px;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.gde-logo-btn:hover,
+.gde-logo-btn:focus-visible {
+  background-color: var(--blue-soft);
+  border-color: var(--border-strong);
   outline: none;
 }
 
@@ -460,106 +469,56 @@ code {
   transition: transform 0.16s ease;
 }
 
-.gde-logo-hover-wrap:hover .gde-logo-svg,
-.gde-logo-hover-wrap:focus-within .gde-logo-svg {
+.gde-logo-btn:hover .gde-logo-svg,
+.gde-logo-btn:focus-visible .gde-logo-svg {
   transform: scale(1.06);
 }
 
-.gde-creator-popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  z-index: 120;
-  width: 300px;
-  background: var(--surface);
-  border: 1.5px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  padding: 14px;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-4px);
-  pointer-events: none;
-  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
+.gde-logo-tooltip {
+  left: 50%;
+  right: auto;
+  transform: translate(-50%, -4px);
 }
 
-.gde-creator-popover::before {
-  content: '';
-  position: absolute;
-  top: -12px;
-  left: 0;
-  right: 0;
-  height: 12px;
-}
-
-.gde-logo-hover-wrap:hover .gde-creator-popover,
-.gde-logo-hover-wrap:focus-within .gde-creator-popover {
+.gde-logo-btn:hover .gde-logo-tooltip,
+.gde-logo-btn:focus-visible .gde-logo-tooltip {
   opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-  pointer-events: auto;
+  transform: translate(-50%, 0);
 }
 
-.gde-creator-popover-inner {
+.gde-creator-modal-layout {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 24px;
 }
 
-.gde-creator-photo-link {
-  display: inline-flex;
-  flex-shrink: 0;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 2px solid var(--sky);
-  transition: transform 0.15s ease;
-}
-
-.gde-creator-photo-link:hover {
-  transform: scale(1.05);
-}
-
-.gde-creator-photo {
-  width: 50px;
-  height: 50px;
+.gde-creator-modal-photo {
+  width: 100px;
+  height: 100px;
   border-radius: 50%;
   object-fit: cover;
-  display: block;
+  flex-shrink: 0;
+  border: 2.5px solid var(--sky);
+  box-shadow: var(--shadow-md);
 }
 
-.gde-creator-info {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 0.82rem;
-  line-height: 1.35;
+.gde-creator-modal-copy {
+  font-size: 0.98rem;
+  line-height: 1.5;
 }
 
-.gde-creator-title {
-  color: var(--text);
-  font-size: 0.86rem;
-}
-
-.gde-creator-domain {
+.gde-creator-single-link {
   color: var(--sky);
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.gde-creator-domain:hover {
+  font-weight: 700;
   text-decoration: underline;
+  margin-left: 4px;
 }
 
-.gde-creator-cta {
-  margin: 2px 0 0;
-  color: var(--text-muted);
-  font-size: 0.79rem;
-}
-
-.gde-creator-cta a {
-  color: var(--sky);
-  font-weight: 600;
-  text-decoration: underline;
+@media (max-width: 560px) {
+  .gde-creator-modal-layout {
+    flex-direction: column;
+    text-align: center;
+  }
 }
 
 .topbar-user-row {
