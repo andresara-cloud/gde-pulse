@@ -1,0 +1,17 @@
+{
+  "projects": {
+    "default": "andresara"
+  },
+  "targets": {
+    "andresara": {
+      "hosting": {
+        "gde": [
+          "gde"
+        ],
+        "gpulse": [
+          "gpulse"
+        ]
+      }
+    }
+  }
+}

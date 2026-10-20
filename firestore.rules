@@ -1,0 +1,488 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // RealAI 2.0 Leaderboard and Stats (Shared Project Collections)
+    // ===============================================================
+    match /leaderboard/{docId} {
+      allow read: if true;
+      allow write: if false; // Only Cloud Functions (Admin SDK) can write
+    }
+    
+    match /video_stats/{docId} {
+      allow read: if true;
+      allow write: if false; // Only Cloud Functions (Admin SDK) can write
+    }
+
+    match /guesses/{docId} {
+      allow read: if false;
+      allow write: if false; // Only Cloud Functions (Admin SDK) can write
+    }
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: exam_leaderboard
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required, 1-30 chars) - Participant display name
+    //   - state: string (required, 2-40 chars) - German Bundesland chosen
+    //   - score: int (required, 0-33) - Correct answers count
+    //   - total: int (required, exactly 33) - Total question count
+    //   - percentage: int (required, 0-100) - Score percentage
+    //   - passed: bool (required) - True if score >= 17
+    //   - timeSpentSec: int (required, 1-3600) - Exam duration in seconds
+    //   - createdAt: timestamp (required) - Submission server timestamp
+    //
+    // Collection: gde_users
+    // Document ID: {userId} (matches Firebase Auth UID)
+    // Fields:
+    //   - email: string (optional, 0-320 chars) - User email address (PII, owner-only)
+    //   - displayName: string (optional, 0-200 chars) - User display name
+    //   - avatarUrl: string (optional, 0-2048 chars) - Profile avatar URL
+    //   - organization: string (optional, 0-200 chars) - User organization/company
+    //   - bio: string (optional, 0-2000 chars) - Speaker biography
+    //   - location: string (optional, 0-200 chars) - Display location
+    //   - gdeProfileUrl: string (optional, 0-2048 chars) - GDE directory profile URL
+    //   - specializations: string (optional, 0-500 chars) - GDE specializations
+    //   - homeCountry: string (optional, 0-100 chars) - GDE home country
+    //   - homeRegion: string (optional, 0-100 chars) - GDE home region
+    //   - currentCountry: string (optional, 0-100 chars) - Current departure country
+    //   - currentRegion: string (optional, 0-100 chars) - Current departure region
+    //   - categories: list (optional, max 25 items) - GDE product categories
+    //   - advocuApiKey: string (optional, only '' or '••••••••' masked sentinel allowed from client)
+    //   - sessionizeSpeakerId: string (optional, 0-200 chars) - Sessionize speaker identifier
+    //   - sessionizeEmail: string (optional, 0-320 chars) - Sessionize account email
+    //   - preferredCurrency: string (optional, 0-10 chars) - Preferred display currency code
+    //   - agentTokenHash: string (optional, 0-128 chars) - SHA-256 hash of user's Personal Agent Token
+    //   - configured: bool (optional) - Whether user completed initial setup
+    //   - travelPlannerEnabled: bool (optional) - Whether optional Travel Planner module is enabled
+    //   - updatedAt: timestamp | string | int (optional) - Last modification timestamp
+    //
+    // Subcollection: gde_users/{userId}/secrets
+    // Document ID: {secretId}
+    // Access: Server-only (Admin SDK / Cloud Functions); client read/write strictly denied.
+    //
+    // Subcollection: gde_users/{userId}/events
+    // Document ID: {eventId}
+    // Required Fields:
+    //   - title: string (required, 1-300 chars) - Event name/title
+    //   - country: string (required, 1-100 chars) - Destination country
+    //   - region: string (required, 1-100 chars) - Destination region
+    //   - startDate: string | timestamp (required, 1-64 chars if string) - Event start date
+    //   - endDate: string | timestamp (required, 0-64 chars if string) - Event end date
+    //   - status: string (required, 1-64 chars) - Event lifecycle status
+    // Optional Fields:
+    //   - id: string (optional, 1-128 chars, immutable on update) - Event ID
+    //   - campaign: string (optional, 0-200 chars) - Associated GDE campaign
+    //   - city: string (optional, 0-150 chars) - Event city
+    //   - departureCountry: string (optional, 0-100 chars) - Departure country for travel
+    //   - departureRegion: string (optional, 0-100 chars) - Departure region for travel
+    //   - eventUrl: string (optional, 0-2048 chars) - Event website URL
+    //   - cfpPlatform: string (optional, 0-100 chars) - CFP platform name
+    //   - cfpUrl: string (optional, 0-2048 chars) - CFP submission URL
+    //   - sessionTitle: string (optional, 0-500 chars) - Talk/session title
+    //   - activityType: string (optional, 0-100 chars) - Advocu activity type
+    //   - eventFormat: string (optional, 0-100 chars) - In-person, virtual, hybrid
+    //   - expectedAudience: number (optional, 0-10000000) - Estimated audience reach
+    //   - isGdgOnCampus: bool (optional) - Whether event is GDG on Campus
+    //   - budgetUsd: number (optional, 0-1000000) - Estimated or requested budget in USD
+    //   - budgetApproved: bool (optional) - Whether budget is approved
+    //   - bookingMode: string (optional, 0-100 chars) - Self-booked vs Worktrips
+    //   - travelApprovalStatus: string (optional, 0-100 chars) - Travel approval status
+    //   - flightBooked: bool (optional) - Whether flights are booked
+    //   - hotelBooked: bool (optional) - Whether hotel is booked
+    //   - worktripsRef: string (optional, 0-200 chars) - Worktrips booking reference
+    //   - worktripsRequested: bool (optional) - Whether Worktrips account/request was initiated
+    //   - worktripsApproved: bool (optional) - Whether Worktrips request was approved
+    //   - worktripsTravelRequested: bool (optional) - Whether Worktrips travel was requested
+    //   - worktripsTravelApproved: bool (optional) - Whether Worktrips travel was approved
+    //   - eventApplied: bool (optional) - Whether speaker applied to the event/CFP
+    //   - eventApproved: bool (optional) - Whether talk/attendance was approved by organizers
+    //   - reimbursementSubmitted: bool (optional) - Whether reimbursement was filed
+    //   - reimbursementSubmittedDate: string | timestamp (optional, 0-64 chars) - Reimbursement date
+    //   - reimbursementAmountUsd: number (optional, 0-1000000) - Reimbursement amount in USD
+    //   - advocuSynced: bool (optional) - Whether activity is synced to Advocu
+    //   - photos: list (optional, max 20 items) - Event photo URLs/references
+    //   - notes: string (optional, 0-5000 chars) - Speaker notes
+    //   - updatedAt: timestamp | string | int (optional) - Last modification timestamp
+    //
+    // Collection: pulse_quizzes
+    // Document ID: {quizId}
+    // Required Fields:
+    //   - id: string (required, 1-128 chars) - Quiz identifier
+    //   - ownerUid: string (required, 1-128 chars, immutable on update) - Host GDE Firebase Auth UID
+    //   - title: string (required, 1-300 chars) - Workshop quiz title
+    //   - code: string (required, 1-20 chars) - Join code for workshop participants
+    //   - status: string (required, enum: 'draft', 'lobby', 'question', 'reveal', 'completed') - Quiz state
+    //   - currentQuestionIndex: int (required, -1 to 100) - Active question index
+    //   - questions: list (required, max 50 items) - Quiz questions array
+    // Optional Fields:
+    //   - ownerName: string (optional, 0-200 chars) - Host display name
+    //   - isActive: bool (optional) - Whether quiz is currently active
+    //   - questionStartedAt: number (optional, 0-9999999999999) - Epoch ms when current question started
+    //   - createdAt: timestamp | string | int (optional) - Creation timestamp
+    //   - updatedAt: timestamp | string | int (optional) - Last modification timestamp
+    //
+    // Subcollection: pulse_quizzes/{quizId}/participants
+    // Document ID: {participantUid}
+    // Required Fields:
+    //   - uid: string (required, must match participantUid) - Participant UID
+    //   - name: string (required, 1-60 chars) - Participant display name
+    //   - score: int (required, 0-1000000) - Total quiz score
+    //   - correctCount: int (required, 0-100) - Total correct answers
+    // Optional Fields:
+    //   - answers: map (optional) - Map of question answers
+    //   - lastAnsweredIndex: int (optional, -1 to 100) - Last question index answered
+    //   - lastSelectedIndex: int (optional, -1 to 10) - Last option index selected
+    //   - joinedAt: timestamp | string | int (optional) - Join timestamp
+    //   - updatedAt: timestamp | string | int (optional) - Last update timestamp
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Shared Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasOnlyAllowedFields(allowedFields) {
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+
+    function hasRequiredFields(requiredFields) {
+      return request.resource.data.keys().hasAll(requiredFields);
+    }
+
+    function isOptionalString(data, field, maxLen) {
+      return !(field in data) || data[field] == null ||
+             (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptionalBool(data, field) {
+      return !(field in data) || data[field] == null || (data[field] is bool);
+    }
+
+    function isOptionalNonNegativeNumber(data, field, maxVal) {
+      return !(field in data) || data[field] == null ||
+             ((data[field] is int || data[field] is float) &&
+              data[field] >= 0 && data[field] <= maxVal);
+    }
+
+    function isOptionalTimestampOrDate(data, field) {
+      return !(field in data) || data[field] == null ||
+             (data[field] is timestamp) ||
+             (data[field] is string && data[field].size() <= 64) ||
+             (data[field] is int && data[field] >= 0);
+    }
+
+    // ===============================================================
+    // German Citizenship Test Helpers & Rules
+    // ===============================================================
+
+    function isValidName(name) {
+      return name is string && name.size() >= 1 && name.size() <= 30;
+    }
+
+    function isValidState(state) {
+      return state is string && state.size() >= 2 && state.size() <= 40;
+    }
+
+    function isValidScore(score) {
+      return score is int && score >= 0 && score <= 33;
+    }
+
+    function isValidTotal(total) {
+      return total is int && total == 33;
+    }
+
+    function isValidPercentage(pct) {
+      return pct is int && pct >= 0 && pct <= 100;
+    }
+
+    function isValidPassed(passed, score) {
+      return passed is bool && (passed == (score >= 17));
+    }
+
+    function isValidDuration(sec) {
+      return sec is int && sec >= 1 && sec <= 3600;
+    }
+
+    function isValidCreatedAt(time) {
+      return time is timestamp && time <= request.time;
+    }
+
+    function isValidLeaderboardEntry(data) {
+      return hasRequiredFields(['name', 'state', 'score', 'total', 'percentage', 'passed', 'timeSpentSec', 'createdAt']) &&
+             hasOnlyAllowedFields(['name', 'state', 'score', 'total', 'percentage', 'passed', 'timeSpentSec', 'createdAt']) &&
+             isValidName(data.name) &&
+             isValidState(data.state) &&
+             isValidScore(data.score) &&
+             isValidTotal(data.total) &&
+             isValidPercentage(data.percentage) &&
+             isValidPassed(data.passed, data.score) &&
+             isValidDuration(data.timeSpentSec) &&
+             isValidCreatedAt(data.createdAt);
+    }
+
+    match /exam_leaderboard/{entryId} {
+      // Allow everyone to read the global high scores
+      allow read: if true;
+
+      // Allow submitting valid exam results with strict schema enforcement
+      allow create: if isValidLeaderboardEntry(request.resource.data);
+
+      // High score entries are immutable once submitted
+      allow update, delete: if false;
+    }
+
+    // ===============================================================
+    // GDE Planner Domain Validators & Rules
+    // ===============================================================
+
+    function isValidGdeUser(data) {
+      let allowedFields = [
+        'email',
+        'displayName',
+        'avatarUrl',
+        'organization',
+        'bio',
+        'location',
+        'gdeProfileUrl',
+        'specializations',
+        'homeCountry',
+        'homeRegion',
+        'currentCountry',
+        'currentRegion',
+        'categories',
+        'advocuApiKey',
+        'sessionizeSpeakerId',
+        'sessionizeEmail',
+        'preferredCurrency',
+        'agentTokenHash',
+        'configured',
+        'travelPlannerEnabled',
+        'updatedAt'
+      ];
+      return data.keys().size() >= 1 &&
+             hasOnlyAllowedFields(allowedFields) &&
+             isOptionalString(data, 'email', 320) &&
+             isOptionalString(data, 'displayName', 200) &&
+             isOptionalString(data, 'homeCountry', 100) &&
+             isOptionalString(data, 'homeRegion', 100) &&
+             isOptionalString(data, 'currentCountry', 100) &&
+             isOptionalString(data, 'currentRegion', 100) &&
+             (!( 'categories' in data ) || data.categories == null ||
+              (data.categories is list && data.categories.size() <= 25)) &&
+             (!('advocuApiKey' in data) || data.advocuApiKey == null || data.advocuApiKey in ['', '••••••••']) &&
+             isOptionalString(data, 'sessionizeSpeakerId', 200) &&
+             isOptionalString(data, 'sessionizeEmail', 320) &&
+             isOptionalString(data, 'preferredCurrency', 10) &&
+             isOptionalString(data, 'agentTokenHash', 128) &&
+             isOptionalBool(data, 'configured') &&
+             isOptionalBool(data, 'travelPlannerEnabled') &&
+             isOptionalTimestampOrDate(data, 'updatedAt');
+    }
+
+    function isValidGdeEvent(data) {
+      let requiredFields = [
+        'title',
+        'country',
+        'region',
+        'startDate',
+        'endDate',
+        'status'
+      ];
+      let allowedFields = [
+        'id',
+        'title',
+        'campaign',
+        'country',
+        'city',
+        'region',
+        'departureCountry',
+        'departureRegion',
+        'eventUrl',
+        'startDate',
+        'endDate',
+        'status',
+        'cfpPlatform',
+        'cfpUrl',
+        'sessionTitle',
+        'activityType',
+        'eventFormat',
+        'expectedAudience',
+        'isGdgOnCampus',
+        'budgetUsd',
+        'budgetApproved',
+        'bookingMode',
+        'travelApprovalStatus',
+        'flightBooked',
+        'hotelBooked',
+        'worktripsRef',
+        'worktripsRequested',
+        'worktripsApproved',
+        'worktripsTravelRequested',
+        'worktripsTravelApproved',
+        'eventApplied',
+        'eventApproved',
+        'reimbursementSubmitted',
+        'reimbursementSubmittedDate',
+        'reimbursementAmountUsd',
+        'advocuSynced',
+        'photos',
+        'notes',
+        'updatedAt'
+      ];
+      return hasRequiredFields(requiredFields) &&
+             hasOnlyAllowedFields(allowedFields) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 300 &&
+             data.country is string && data.country.size() >= 1 && data.country.size() <= 100 &&
+             data.region is string && data.region.size() >= 1 && data.region.size() <= 100 &&
+             ((data.startDate is string && data.startDate.size() >= 1 && data.startDate.size() <= 64) ||
+              data.startDate is timestamp) &&
+             ((data.endDate is string && data.endDate.size() <= 64) ||
+              data.endDate is timestamp) &&
+             data.status is string && data.status.size() >= 1 && data.status.size() <= 64 &&
+             (!('sessionTitle' in data) || data.sessionTitle is string) &&
+             (!('budgetUsd' in data) || data.budgetUsd is int || data.budgetUsd is float) &&
+             (!('eventApplied' in data) || data.eventApplied is bool) &&
+             (!('eventApproved' in data) || data.eventApproved is bool) &&
+             (!('worktripsRequested' in data) || data.worktripsRequested is bool) &&
+             (!('worktripsApproved' in data) || data.worktripsApproved is bool) &&
+             (!('notes' in data) || data.notes is string);
+    }
+
+    match /gde_users/{userId} {
+      // Strictly isolate user profiles: only owner can get their own doc; collection listing is forbidden
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidGdeUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidGdeUser(request.resource.data);
+      allow delete: if isOwner(userId);
+
+      match /secrets/{secretId} {
+        allow read, write: if false;
+      }
+
+      match /events/{eventId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidGdeEvent(request.resource.data);
+        allow update: if isOwner(userId) &&
+                      isValidGdeEvent(request.resource.data) &&
+                      (!('id' in request.resource.data) ||
+                       !('id' in resource.data) ||
+                       request.resource.data.id == resource.data.id);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // ===============================================================
+    // GDE Pulse Live Workshop Quiz Validators & Rules
+    // ===============================================================
+
+    function isValidPulseQuiz(data) {
+      let requiredFields = [
+        'id',
+        'ownerUid',
+        'title',
+        'code',
+        'status',
+        'currentQuestionIndex',
+        'questions'
+      ];
+      let allowedFields = [
+        'id',
+        'ownerUid',
+        'ownerName',
+        'title',
+        'code',
+        'status',
+        'isActive',
+        'currentQuestionIndex',
+        'questionStartedAt',
+        'questions',
+        'createdAt',
+        'updatedAt'
+      ];
+      return hasRequiredFields(requiredFields) &&
+             hasOnlyAllowedFields(allowedFields) &&
+             data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+             data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+             isOptionalString(data, 'ownerName', 200) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 300 &&
+             data.code is string && data.code.size() >= 1 && data.code.size() <= 20 &&
+             data.status in ['draft', 'lobby', 'question', 'reveal', 'completed'] &&
+             isOptionalBool(data, 'isActive') &&
+             data.currentQuestionIndex is int && data.currentQuestionIndex >= -1 && data.currentQuestionIndex <= 100 &&
+             isOptionalNonNegativeNumber(data, 'questionStartedAt', 9999999999999) &&
+             data.questions is list && data.questions.size() <= 50 &&
+             isOptionalTimestampOrDate(data, 'createdAt') &&
+             isOptionalTimestampOrDate(data, 'updatedAt');
+    }
+
+    function isValidPulseParticipant(data, participantUid) {
+      let requiredFields = [
+        'uid',
+        'name',
+        'score',
+        'correctCount'
+      ];
+      let allowedFields = [
+        'uid',
+        'name',
+        'score',
+        'correctCount',
+        'answers',
+        'lastAnsweredIndex',
+        'lastSelectedIndex',
+        'joinedAt',
+        'updatedAt'
+      ];
+      return hasRequiredFields(requiredFields) &&
+             hasOnlyAllowedFields(allowedFields) &&
+             data.uid is string && data.uid == participantUid &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
+             data.score is int && data.score >= 0 && data.score <= 1000000 &&
+             data.correctCount is int && data.correctCount >= 0 && data.correctCount <= 100 &&
+             (!('answers' in data) || data.answers is map) &&
+             (!('lastAnsweredIndex' in data) || (data.lastAnsweredIndex is int && data.lastAnsweredIndex >= -1 && data.lastAnsweredIndex <= 100)) &&
+             (!('lastSelectedIndex' in data) || (data.lastSelectedIndex is int && data.lastSelectedIndex >= -1 && data.lastSelectedIndex <= 10)) &&
+             isOptionalTimestampOrDate(data, 'joinedAt') &&
+             isOptionalTimestampOrDate(data, 'updatedAt');
+    }
+
+    match /pulse_quizzes/{quizId} {
+      allow read: if true;
+      allow create: if isAuthenticated() &&
+                    request.auth.token.firebase.sign_in_provider != 'anonymous' &&
+                    request.resource.data.ownerUid == request.auth.uid &&
+                    isValidPulseQuiz(request.resource.data);
+      allow update: if isAuthenticated() &&
+                    resource.data.ownerUid == request.auth.uid &&
+                    request.resource.data.ownerUid == resource.data.ownerUid &&
+                    isValidPulseQuiz(request.resource.data);
+      allow delete: if isAuthenticated() &&
+                    resource.data.ownerUid == request.auth.uid;
+
+      match /participants/{participantUid} {
+        allow read: if true;
+        allow create, update: if isAuthenticated() &&
+                              (request.auth.uid == participantUid ||
+                               get(/databases/$(database)/documents/pulse_quizzes/$(quizId)).data.ownerUid == request.auth.uid) &&
+                              isValidPulseParticipant(request.resource.data, participantUid);
+        allow delete: if isAuthenticated() &&
+                      (request.auth.uid == participantUid ||
+                       get(/databases/$(database)/documents/pulse_quizzes/$(quizId)).data.ownerUid == request.auth.uid);
+      }
+    }
+  }
+}

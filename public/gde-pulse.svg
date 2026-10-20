@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80" width="240" height="80" fill="none">
+  <defs>
+    <linearGradient id="gdePulseGrad" x1="20" y1="40" x2="220" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EA4335" />
+      <stop offset="35%" stop-color="#4285F4" />
+      <stop offset="70%" stop-color="#FBBC04" />
+      <stop offset="100%" stop-color="#34A853" />
+    </linearGradient>
+    <filter id="pulseGlow" x="-15%" y="-25%" width="130%" height="150%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Left GDE '<' bracket -->
+  <path
+    d="M34 20 L14 40 L34 60"
+    stroke="#EA4335"
+    stroke-width="7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Center GDE Pulse ECG waveform -->
+  <path
+    d="M44 40 H74 L88 22 L104 62 L122 12 L138 56 L152 30 L162 40 H196"
+    stroke="url(#gdePulseGrad)"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    filter="url(#pulseGlow)"
+  />
+
+  <!-- Right GDE '>' bracket -->
+  <path
+    d="M206 20 L226 40 L206 60"
+    stroke="#34A853"
+    stroke-width="7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Peak accent nodes -->
+  <circle cx="122" cy="12" r="4.5" fill="#FBBC04" />
+  <circle cx="88" cy="22" r="3.5" fill="#4285F4" />
+  <circle cx="152" cy="30" r="3.5" fill="#34A853" />
+</svg>

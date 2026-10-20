@@ -1,0 +1,86 @@
+{
+  "auth": {
+    "providers": {
+      "anonymous": true,
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "GDE Pulse",
+        "supportEmail": "andresara@gmail.com",
+        "authorizedRedirectUris": [
+          "https://gde.web.app/__/auth/handler",
+          "http://localhost:5173"
+        ]
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "gde-planner",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ]
+    }
+  ],
+  "hosting": [
+    {
+      "target": "gde",
+      "public": "dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**",
+        "functions/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/api/advocu/**",
+          "function": "advocuProxy"
+        },
+        {
+          "source": "/api/advocu",
+          "function": "advocuProxy"
+        },
+        {
+          "source": "/api/agent/**",
+          "function": "advocuProxy"
+        },
+        {
+          "source": "/api/agent",
+          "function": "advocuProxy"
+        },
+        {
+          "source": "/api/sql",
+          "function": "advocuProxy"
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    },
+    {
+      "target": "gpulse",
+      "public": "dist",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**",
+        "functions/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    }
+  ]
+}

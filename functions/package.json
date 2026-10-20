@@ -1,0 +1,13 @@
+{
+  "name": "gde-planner-functions",
+  "description": "Advocu API proxy for GDE Planner",
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^4.3.1"
+  },
+  "private": true
+}
