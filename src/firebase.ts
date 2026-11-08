@@ -84,6 +84,62 @@ export async function getFirebaseIdToken(): Promise<string> {
   }
 }
 
+// ===============================================================
+// GDE access control (validated against the GDE directory, or approved by the admin)
+// ===============================================================
+
+export type GdeAccessStatus = 'validated' | 'approved' | 'unverified' | 'pending' | 'blocked';
+
+export interface GdeAccessResult {
+  status: GdeAccessStatus;
+  alreadyRequested?: boolean;
+}
+
+const accessCacheKeyFor = (uid: string) => `gde_planner_access_v1_${uid}`;
+
+export function isGdeAccessAllowed(status: string | null | undefined): boolean {
+  return status === 'validated' || status === 'approved';
+}
+
+export function getCachedGdeAccessStatus(uid: string): GdeAccessStatus | null {
+  try {
+    return (localStorage.getItem(accessCacheKeyFor(uid)) as GdeAccessStatus | null) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function postGdeAccess(path: 'check' | 'request', uid: string, body: object): Promise<GdeAccessResult> {
+  const idToken = await getFirebaseIdToken();
+  if (!idToken) throw new Error('Sign in with Google first.');
+  const res = await fetch(`/api/access/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Firebase-Id-Token': idToken },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!data?.status) {
+    throw new Error(String(data?.error || `Access check failed (HTTP ${res.status}).`));
+  }
+  try {
+    localStorage.setItem(accessCacheKeyFor(uid), String(data.status));
+  } catch {
+    // ignore
+  }
+  return { status: data.status as GdeAccessStatus, alreadyRequested: Boolean(data.alreadyRequested) };
+}
+
+export function checkGdeAccess(
+  uid: string,
+  profileHint?: { email?: string; displayName?: string },
+): Promise<GdeAccessResult> {
+  return postGdeAccess('check', uid, profileHint || {});
+}
+
+export function requestGdeAccess(uid: string, profileLink: string): Promise<GdeAccessResult> {
+  return postGdeAccess('request', uid, { profileLink });
+}
+
 export async function syncEncryptedAdvocuKeyToServer(rawKey: string): Promise<string> {
   const trimmed = (rawKey || '').trim();
   if (isMaskedAdvocuKey(trimmed)) {
@@ -156,11 +212,40 @@ export function saveLocalEvents(uid: string, events: GdeEvent[]): void {
   localStorage.setItem(eventsKeyFor(uid), JSON.stringify(events));
 }
 
+const SS_GDRIVE_TOKEN_KEY = 'gde_stage_gdrive_access_token_v1';
+
 export async function signInWithGoogle(): Promise<User> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   const cred = await signInWithPopup(auth, provider);
   return cred.user;
+}
+
+export async function requestGoogleDriveAccessToken(forcePrompt = false): Promise<string> {
+  if (!forcePrompt) {
+    try {
+      const cached = sessionStorage.getItem(SS_GDRIVE_TOKEN_KEY);
+      if (cached) return cached;
+    } catch {
+      // ignore
+    }
+  }
+  const provider = new GoogleAuthProvider();
+  provider.addScope('https://www.googleapis.com/auth/drive.file');
+  if (auth.currentUser?.email) {
+    provider.setCustomParameters({ login_hint: auth.currentUser.email });
+  }
+  const cred = await signInWithPopup(auth, provider);
+  const oauthCred = GoogleAuthProvider.credentialFromResult(cred);
+  const token = oauthCred?.accessToken || '';
+  if (token) {
+    try {
+      sessionStorage.setItem(SS_GDRIVE_TOKEN_KEY, token);
+    } catch {
+      // ignore
+    }
+  }
+  return token;
 }
 
 export function getSavedSession(): AuthSession | null {

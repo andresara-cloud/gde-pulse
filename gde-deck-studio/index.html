@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en" data-theme="midnight">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0f19" />
+    <title>GDE Stage // Autonomous Presentation &amp; Video Studio</title>
+    <link rel="icon" type="image/svg+xml" href="/gde-pulse.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <a href="#studioMainWorkspace" class="skip-link visually-hidden">Skip to presentation studio</a>
+
+    <!-- STANDALONE PRODUCT HEADER -->
+    <header class="studio-topbar">
+      <div class="studio-topbar-inner">
+        <div class="studio-brand-cluster">
+          <svg width="44" height="30" viewBox="0 0 96 64" fill="none" aria-hidden="true">
+            <path d="M14 32 L36 50" stroke="#6d83f2" stroke-width="13" stroke-linecap="round" />
+            <path d="M14 32 L36 14" stroke="#c95b3c" stroke-width="13" stroke-linecap="round" />
+            <path d="M82 32 L60 50" stroke="#dfb13b" stroke-width="13" stroke-linecap="round" />
+            <path d="M60 14 L82 32" stroke="#66a85b" stroke-width="13" stroke-linecap="round" />
+          </svg>
+          <div>
+            <div class="studio-brand-title-row">
+              <span class="studio-brand-eyebrow">Google Developer Experts</span>
+              <span class="studio-brand-slash" aria-hidden="true">//</span>
+              <strong id="productBrandNameDisplay" class="studio-brand-product">GDE Stage</strong>
+              <span class="model-pill model-pill-blue">Gemini 4 Argon (High)</span>
+              <span class="model-pill model-pill-green">Nano Banana 2.1</span>
+              <span class="model-pill model-pill-amber">Gemini Omni 1.2 Flash (GA)</span>
+            </div>
+            <p class="studio-brand-sub">
+              Standalone Cloud Run Python + OpenXML Presentation &amp; Video Creator for GDEs
+            </p>
+          </div>
+        </div>
+
+        <div class="studio-topbar-actions">
+          <div class="name-preview-switcher" role="group" aria-label="Preview Product Name">
+            <span class="muted-xs">Preview Name:</span>
+            <button type="button" class="name-chip active" data-product-name="GDE Stage">GDE Stage</button>
+            <button type="button" class="name-chip" data-product-name="GDE Prism">GDE Prism</button>
+            <button type="button" class="name-chip" data-product-name="GDE Canvas">GDE Canvas</button>
+            <button type="button" class="name-chip" data-product-name="GDE Forge">GDE Forge</button>
+          </div>
+          <button type="button" id="btnToggleThemeMode" class="btn btn-ghost btn-sm">
+            ☀ / ☾ Theme
+          </button>
+          <button type="button" id="btnDownloadPythonScript" class="btn btn-secondary btn-sm">
+            🐍 Export Python + XML
+          </button>
+          <button type="button" id="btnDownloadNativePptx" class="btn btn-primary">
+            ⬇ Download Native .PPTX
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN 3-COLUMN PRESENTATION STUDIO WORKSPACE -->
+    <main id="studioMainWorkspace" class="studio-main" tabindex="-1">
+      <div id="studioAppRoot"></div>
+    </main>
+
+    <div id="studioToast" class="studio-toast" role="status" aria-live="polite" hidden></div>
+
+    <script type="module" src="./src/app.ts"></script>
+  </body>
+</html>

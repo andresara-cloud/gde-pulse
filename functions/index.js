@@ -1,6 +1,7 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
+const gdeAccess = require('./gdeAccess');
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -8,6 +9,10 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 const ADVOCU_BASE = 'https://api.advocu.com/personal-api/v1/gde';
+const ADVOCU_COMMUNITY_ID = '6597d5c3b52eaef4e46a602e';
+const ADVOCU_TOKEN_URL = 'https://accounts.advocu.com/realms/advocu/protocol/openid-connect/token';
+const ADVOCU_REFRESH_SECRET_NAME = 'advocu-refresh-token';
+const ADVOCU_OPEN_CFP_SNAPSHOT = require('./advocu_opencfp_snapshot.json');
 const GDE_DIRECTORY_RPC_URL =
   'https://me.developers.google.com/_/GoogleDeveloperProfile/data/batchexecute?rpcids=KbHoR';
 const GEMINI_MODEL = 'gemini-3.8-flash';
@@ -763,263 +768,387 @@ function normalizeSheetCountryAndCity(rawRegion, rawCountry, rawCity) {
   return { region, country, city };
 }
 
-async function fetchEmeaHubSheetEvents() {
-  if (cachedEmeaHubItems && Date.now() - cachedEmeaHubAt < CACHE_TTL_MS) {
-    return cachedEmeaHubItems;
+let cachedAdvocuKeycloakToken = '';
+let cachedAdvocuKeycloakExp = 0;
+let lastAdvocuSessionState = {
+  active: false,
+  error: '',
+  lastCheckedAt: '',
+};
+
+async function rotateAdvocuRefreshTokenInSecretManager(newToken) {
+  const clean = String(newToken || '').trim();
+  if (!clean) return false;
+  try {
+    const cloudToken = await getCloudRuntimeAccessToken();
+    if (!cloudToken) return false;
+    const parent = `https://secretmanager.googleapis.com/v1/projects/${GCP_PROJECT_ID}/secrets/${ADVOCU_REFRESH_SECRET_NAME}`;
+    const addResp = await fetch(`${parent}:addVersion`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${cloudToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        payload: { data: Buffer.from(clean, 'utf8').toString('base64') },
+      }),
+    });
+    if (!addResp.ok) return false;
+    const added = await addResp.json();
+    const listResp = await fetch(`${parent}/versions?filter=state:ENABLED`, {
+      headers: { Authorization: `Bearer ${cloudToken}` },
+    });
+    if (listResp.ok) {
+      const listData = await listResp.json();
+      const versions = Array.isArray(listData?.versions) ? listData.versions : [];
+      for (const v of versions) {
+        if (v.name && v.name !== added.name) {
+          await fetch(`https://secretmanager.googleapis.com/v1/${v.name}:disable`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${cloudToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({}),
+          }).catch(() => {});
+        }
+      }
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Advocu Session] Secret Manager rotation warning:', err.message);
+    return false;
+  }
+}
+
+async function getAdvocuKeycloakAccessToken(overrideRefreshToken = '') {
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (
+    !overrideRefreshToken &&
+    cachedAdvocuKeycloakToken &&
+    cachedAdvocuKeycloakExp > nowSec + 60
+  ) {
+    return cachedAdvocuKeycloakToken;
+  }
+  try {
+    let refreshToken = String(overrideRefreshToken || '').trim();
+    if (!refreshToken) {
+      try {
+        refreshToken = (await fetchSecretByName(ADVOCU_REFRESH_SECRET_NAME)).trim();
+      } catch {
+        refreshToken = String(process.env.ADVOCU_REFRESH_TOKEN || '').trim();
+      }
+    }
+    if (!refreshToken) {
+      lastAdvocuSessionState = {
+        active: false,
+        error: 'No advocu-refresh-token configured in Secret Manager',
+        lastCheckedAt: new Date().toISOString(),
+      };
+      return '';
+    }
+    const resp = await fetch(ADVOCU_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: 'advocu-prod',
+        refresh_token: refreshToken,
+      }),
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      lastAdvocuSessionState = {
+        active: false,
+        error: `Keycloak HTTP ${resp.status}: ${errText.slice(0, 180)}`,
+        lastCheckedAt: new Date().toISOString(),
+      };
+      cachedAdvocuKeycloakToken = '';
+      cachedAdvocuKeycloakExp = 0;
+      return '';
+    }
+    const data = await resp.json();
+    cachedAdvocuKeycloakToken = data.access_token || '';
+    cachedAdvocuKeycloakExp = nowSec + (Number(data.expires_in) || 300);
+    lastAdvocuSessionState = {
+      active: Boolean(cachedAdvocuKeycloakToken),
+      error: '',
+      lastCheckedAt: new Date().toISOString(),
+    };
+    const nextRefresh = String(data.refresh_token || overrideRefreshToken || '').trim();
+    if (nextRefresh && (overrideRefreshToken || nextRefresh !== refreshToken)) {
+      process.env.ADVOCU_REFRESH_TOKEN = nextRefresh;
+      await rotateAdvocuRefreshTokenInSecretManager(nextRefresh);
+    }
+    return cachedAdvocuKeycloakToken;
+  } catch (err) {
+    lastAdvocuSessionState = {
+      active: false,
+      error: err.message || String(err),
+      lastCheckedAt: new Date().toISOString(),
+    };
+    return '';
+  }
+}
+
+function detectAdvocuCampaign(title, tags = []) {
+  const combined = `${title || ''} ${(tags || []).join(' ')}`.toLowerCase();
+  if (combined.includes('devfest')) return 'DevFest';
+  if (combined.includes('build with ai') || combined.includes('bwai')) return 'Build with AI';
+  if (combined.includes('i/o extended') || combined.includes('io extended')) return 'I/O Extended';
+  return 'GDG';
+}
+
+function parseAdvocuEventPayload(ev, fallbackSnap = null) {
+  const d =
+    ev?.data && typeof ev.data === 'object' ? { ...ev, ...ev.data } : ev || {};
+  const id = String(ev?.id || d.id || fallbackSnap?.id || '').trim();
+  const cfpArr = Array.isArray(ev?.callForPapers) ? ev.callForPapers : [];
+  const cfp = cfpArr[0] || {};
+  const cfpId = String(cfp.id || d.cfpId || '').trim();
+  const cfpUrl =
+    (id && cfpId
+      ? `https://app.advocu.com/public/gde/events/${id}?cfpid=${cfpId}`
+      : fallbackSnap?.cfpUrl) ||
+    (id ? `https://app.advocu.com/events/${id}` : '');
+
+  const rawDesc = String(d.shortDescription || d.description || fallbackSnap?.description || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  let externalUrl = String(
+    d.bevyEventUrl || d.eventUrl || d.url || fallbackSnap?.externalUrl || '',
+  ).trim();
+  if (!externalUrl || /advocu\.com/i.test(externalUrl)) {
+    const urlMatches = String(d.description || '').match(/https?:\/\/[^\s"'<>)]+/gi) || [];
+    const nonAdvocu = urlMatches.find((u) => !/advocu\.com/i.test(u));
+    externalUrl = nonAdvocu || '';
   }
 
-  const token = await getSheetsAccessToken();
-  const url =
-    `https://sheets.googleapis.com/v4/spreadsheets/${EMEA_HUB_SPREADSHEET_ID}` +
-    `?ranges=${encodeURIComponent('EMEA Conference CFP')}` +
-    `&ranges=${encodeURIComponent('Non-GDG Dev Community')}` +
-    `&ranges=${encodeURIComponent('GDGs')}` +
-    `&fields=sheets(properties.title,data.rowData.values(formattedValue,hyperlink))`;
+  const startDate = String(d.startDateInUtc || '').slice(0, 10) || fallbackSnap?.startDate || '';
+  const endDate = String(d.endDateInUtc || '').slice(0, 10) || fallbackSnap?.endDate || startDate;
+  const cfpDeadline =
+    String(
+      cfp.submissionDeadlineInUtc ||
+        cfp.endDateInUtc ||
+        d.nearestCallForPapersDeadline ||
+        '',
+    ).slice(0, 10) ||
+    fallbackSnap?.cfpDeadline ||
+    '';
+  const cfpStatus = String(
+    cfp.status || d.callForPapersStatus || fallbackSnap?.cfpStatus || 'OPEN',
+  ).toUpperCase();
+  const tags = Array.isArray(d.tags) && d.tags.length > 0 ? d.tags : fallbackSnap?.tags || [];
+  const rawType = String(d.eventType || d.slug || fallbackSnap?.eventFormat || 'In-Person');
+  const eventFormat = /online|virtual/i.test(rawType)
+    ? 'Virtual'
+    : /hybrid/i.test(rawType)
+      ? 'Hybrid'
+      : 'In-Person';
+  const title = String(d.title || fallbackSnap?.title || '').trim();
 
-  const resp = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!resp.ok) {
-    throw new Error(`Google Sheets API HTTP ${resp.status}`);
+  return {
+    id,
+    title,
+    city: String(d.city || fallbackSnap?.city || '').trim(),
+    country: String(d.country || fallbackSnap?.country || '').trim(),
+    startDate,
+    endDate,
+    cfpDeadline,
+    cfpStatus: cfpStatus === 'CLOSED' ? 'CLOSED' : 'OPEN',
+    cfpUrl,
+    externalUrl,
+    eventFormat,
+    tags,
+    campaign: detectAdvocuCampaign(title, tags),
+    chapterTitle: String(
+      d.gdgChapterName || d.bevyChapterTitle || fallbackSnap?.chapterTitle || 'Advocu GDE Event',
+    ).trim(),
+    description: rawDesc.slice(0, 600),
+    expectedAudience:
+      Number(d.expectedNumberOfAttendees || fallbackSnap?.expectedAudience || 250) || 250,
+  };
+}
+
+async function fetchAdvocuEventById(eventId) {
+  const cleanId = String(eventId || '').trim();
+  if (!/^[a-f0-9]{24}$/i.test(cleanId)) return null;
+  const snapMatch = Array.isArray(ADVOCU_OPEN_CFP_SNAPSHOT)
+    ? ADVOCU_OPEN_CFP_SNAPSHOT.find((item) => item.id === cleanId) || null
+    : null;
+
+  try {
+    const openResp = await fetch(`https://api.advocu.com/open/events/${cleanId}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (openResp.ok) {
+      const openData = await openResp.json();
+      if (openData && openData.data) {
+        return parseAdvocuEventPayload(openData, snapMatch);
+      }
+    }
+  } catch {
+    // Fallback to Keycloak authenticated endpoint or snapshot
   }
-  const data = await resp.json();
-  const sheets = Array.isArray(data?.sheets) ? data.sheets : [];
-  const today = new Date().toISOString().slice(0, 10);
 
-  const cfpMap = new Map();
-  const commMap = new Map();
-  const gdgMap = new Map();
-
-  for (const sheet of sheets) {
-    const tabTitle = String(sheet?.properties?.title || '');
-    const rows = sheet?.data?.[0]?.rowData || [];
-
-    if (tabTitle === 'EMEA Conference CFP') {
-      for (let i = 2; i < rows.length; i++) {
-        const v = rows[i]?.values || [];
-        const title = String(v[3]?.formattedValue || '').trim();
-        if (!title) continue;
-
-        const startDate = parseSheetDate(v[4]?.formattedValue);
-        if (!startDate) continue;
-        const rawEndDate = parseSheetDate(v[5]?.formattedValue) || startDate;
-        const startMs = Date.parse(`${startDate}T00:00:00Z`);
-        const endMs = Date.parse(`${rawEndDate}T00:00:00Z`);
-        const spanDays = Number.isNaN(endMs) ? 0 : Math.round((endMs - startMs) / 86400000);
-        const endDate = spanDays < 0 || spanDays > 14 ? startDate : rawEndDate;
-        if (endDate < today) continue;
-
-        const startYear = startDate.slice(0, 4);
-        const editionYears = [];
-        for (const m of title.matchAll(/\b(202[0-8])\b/g)) {
-          editionYears.push(m[1]);
+  try {
+    const kcToken = await getAdvocuKeycloakAccessToken();
+    if (kcToken) {
+      const authResp = await fetch(
+        `https://api.advocu.com/${ADVOCU_COMMUNITY_ID}/events/${cleanId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${kcToken}`,
+            Accept: 'application/json',
+          },
+        },
+      );
+      if (authResp.ok) {
+        const authData = await authResp.json();
+        if (authData && (authData.data || authData.id)) {
+          return parseAdvocuEventPayload(authData, snapMatch);
         }
-        for (const m of title.matchAll(/(?:^|\s)'(2[0-8])\b/g)) {
-          editionYears.push(`20${m[1]}`);
-        }
-        if (editionYears.some((yr) => yr !== startYear)) {
-          console.warn(
-            `[EMEA Hub] Skipping stale conference row ${i}: "${title}" with startDate ${startDate}`,
-          );
-          continue;
-        }
-
-        const { region, country, city } = normalizeSheetCountryAndCity(
-          v[0]?.formattedValue,
-          v[1]?.formattedValue,
-          v[2]?.formattedValue,
-        );
-        if (!country) continue;
-
-        const nameLink = String(v[3]?.hyperlink || '').trim();
-        const organizer = String(v[6]?.formattedValue || '').trim();
-        const rawFormat = String(v[7]?.formattedValue || 'In-Person').trim();
-        const eventFormat =
-          rawFormat === 'Hybrid' || rawFormat === 'Virtual' ? rawFormat : 'In-Person';
-        const expectedAudience =
-          parseInt(String(v[8]?.formattedValue || '').replace(/[^0-9]/g, ''), 10) || 500;
-        const techFocus = String(v[9]?.formattedValue || '').trim();
-        const rawCfpStatus = String(v[10]?.formattedValue || '').trim().toUpperCase();
-        const cfpDeadlineRaw = String(v[11]?.formattedValue || '').trim();
-        const cfpDeadline = parseSheetDate(cfpDeadlineRaw);
-        const isInProgress = startDate <= today && endDate >= today;
-
-        let effectiveCfpStatus = '';
-        if (
-          rawCfpStatus === 'OPEN' &&
-          !isInProgress &&
-          Boolean(cfpDeadline && cfpDeadline >= today)
-        ) {
-          effectiveCfpStatus = 'OPEN';
-        } else if (
-          rawCfpStatus === 'CLOSED' ||
-          Boolean(cfpDeadline && cfpDeadline < today) ||
-          (rawCfpStatus === 'OPEN' && isInProgress)
-        ) {
-          effectiveCfpStatus = 'CLOSED';
-        }
-
-        const rawCfpCell = String(v[12]?.hyperlink || v[12]?.formattedValue || '').trim();
-        const cfpUrl = /^https?:\/\//i.test(rawCfpCell) ? rawCfpCell : '';
-        const primaryUrl =
-          nameLink ||
-          cfpUrl ||
-          `https://docs.google.com/spreadsheets/d/${EMEA_HUB_SPREADSHEET_ID}/edit?gid=1455532387#gid=1455532387`;
-
-        const dedupeKey = `${title.toLowerCase()}|${city.toLowerCase()}|${startDate.slice(0, 7)}`;
-        const existing = cfpMap.get(dedupeKey);
-        if (existing) {
-          if (!existing.cfpUrl && cfpUrl) existing.cfpUrl = cfpUrl;
-          if (nameLink && existing.url.includes('docs.google.com/spreadsheets')) {
-            existing.url = nameLink;
-          }
-          if (effectiveCfpStatus === 'OPEN') {
-            existing.cfpStatus = 'OPEN';
-            existing.cfpDeadline = cfpDeadline;
-          }
-          continue;
-        }
-
-        cfpMap.set(dedupeKey, {
-          externalId: `emea-cfp-${i}`,
-          title,
-          campaign: '3rd-Party',
-          source: 'EMEA Conference',
-          region,
-          city,
-          country,
-          startDate,
-          endDate,
-          isInProgress,
-          url: primaryUrl,
-          cfpUrl: cfpUrl || primaryUrl,
-          cfpStatus: effectiveCfpStatus,
-          cfpDeadline,
-          cfpDeadlineRaw,
-          techFocus,
-          eventFormat,
-          expectedAudience,
-          isGdgOnCampus: false,
-          chapterTitle: organizer || 'EMEA Conference',
-        });
       }
-    } else if (tabTitle === 'Non-GDG Dev Community') {
-      for (let i = 2; i < rows.length; i++) {
-        const v = rows[i]?.values || [];
-        const title = String(v[3]?.formattedValue || '').trim();
-        if (!title) continue;
+    }
+  } catch {
+    // Fallback to snapshot
+  }
 
-        const cadence = String(v[7]?.formattedValue || '').trim();
-        if (cadence.toLowerCase() === 'inactive') continue;
+  return snapMatch ? parseAdvocuEventPayload({}, snapMatch) : null;
+}
 
-        const { region, country, city } = normalizeSheetCountryAndCity(
-          v[0]?.formattedValue,
-          v[1]?.formattedValue,
-          v[2]?.formattedValue,
-        );
-        if (!country) continue;
-
-        const nameLink = String(v[3]?.hyperlink || '').trim();
-        const description = String(v[4]?.formattedValue || '').trim();
-        const expectedAudience =
-          parseInt(String(v[6]?.formattedValue || '').replace(/[^0-9]/g, ''), 10) || 250;
-        const rawFormat = String(v[8]?.formattedValue || 'In-Person').trim();
-        const eventFormat =
-          rawFormat === 'Hybrid' || rawFormat === 'Virtual' ? rawFormat : 'In-Person';
-        const techFocus = String(v[9]?.formattedValue || '').trim();
-        const rawCfpCell = String(v[10]?.hyperlink || v[10]?.formattedValue || '').trim();
-        const cfpUrl = /^https?:\/\//i.test(rawCfpCell) ? rawCfpCell : '';
-        const rawOrgCell = String(v[11]?.hyperlink || v[11]?.formattedValue || '').trim();
-        const orgUrl = /^https?:\/\//i.test(rawOrgCell) ? rawOrgCell : '';
-        const primaryUrl =
-          nameLink ||
-          cfpUrl ||
-          orgUrl ||
-          `https://docs.google.com/spreadsheets/d/${EMEA_HUB_SPREADSHEET_ID}/edit?gid=541166130#gid=541166130`;
-
-        const dedupeKey = `${title.toLowerCase()}|${city.toLowerCase()}|${country.toLowerCase()}`;
-        if (commMap.has(dedupeKey)) continue;
-
-        commMap.set(dedupeKey, {
-          externalId: `emea-comm-${i}`,
-          title,
-          campaign: '3rd-Party',
-          source: 'Non-GDG Community',
-          region,
-          city,
-          country,
-          startDate: '',
-          endDate: '',
-          cadence: cadence || 'Recurring Meetup',
-          description,
-          url: primaryUrl,
-          cfpUrl: cfpUrl || primaryUrl,
-          cfpStatus: cfpUrl ? 'OPEN' : '',
-          techFocus,
-          eventFormat,
-          expectedAudience,
-          isGdgOnCampus: false,
-          chapterTitle: `${cadence || 'Community'} Meetup${techFocus ? ` · ${techFocus}` : ''}`,
-        });
-      }
-    } else if (tabTitle === 'GDGs') {
-      for (let i = 2; i < rows.length; i++) {
-        const v = rows[i]?.values || [];
-        const title = String(v[3]?.formattedValue || '').trim();
-        if (!title) continue;
-
-        const { region, country, city } = normalizeSheetCountryAndCity(
-          v[0]?.formattedValue,
-          v[1]?.formattedValue,
-          v[2]?.formattedValue,
-        );
-        if (!country) continue;
-
-        const rawChapterUrl = String(v[4]?.hyperlink || v[4]?.formattedValue || '').trim();
-        const primaryUrl =
-          /^https?:\/\//i.test(rawChapterUrl)
-            ? rawChapterUrl
-            : `https://gdg.community.dev`;
-
-        const dedupeKey = `${title.toLowerCase()}|${city.toLowerCase()}|${country.toLowerCase()}`;
-        if (gdgMap.has(dedupeKey)) continue;
-
-        gdgMap.set(dedupeKey, {
-          externalId: `emea-gdg-${i}`,
-          title,
-          campaign: 'GDG',
-          source: 'EMEA GDG Chapter',
-          region,
-          city,
-          country,
-          startDate: '',
-          endDate: '',
-          cadence: 'GDG Chapter',
-          url: primaryUrl,
-          cfpUrl: primaryUrl,
-          eventFormat: 'In-Person',
-          expectedAudience: 150,
-          isGdgOnCampus: false,
-          chapterTitle: title,
-        });
+async function fetchLiveAdvocuOpenCfpEvents() {
+  const byId = new Map();
+  if (Array.isArray(ADVOCU_OPEN_CFP_SNAPSHOT)) {
+    for (const item of ADVOCU_OPEN_CFP_SNAPSHOT) {
+      if (item && item.id) {
+        byId.set(item.id, parseAdvocuEventPayload({}, item));
       }
     }
   }
 
-  const conferences = Array.from(cfpMap.values()).sort((a, b) =>
+  const liveDiscoveredIds = [];
+  try {
+    const kcToken = await getAdvocuKeycloakAccessToken();
+    if (kcToken) {
+      for (let page = 0; page < 6; page++) {
+        const resp = await fetch(
+          `https://api.advocu.com/${ADVOCU_COMMUNITY_ID}/events?page=${page}&size=50&tab=open-cfp`,
+          {
+            headers: {
+              Authorization: `Bearer ${kcToken}`,
+              Accept: 'application/json',
+              'User-Agent':
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+            },
+          },
+        );
+        if (!resp.ok) break;
+        const pageData = await resp.json();
+        const content = Array.isArray(pageData)
+          ? pageData
+          : Array.isArray(pageData?.content)
+            ? pageData.content
+            : [];
+        if (content.length === 0) break;
+        for (const ev of content) {
+          const parsed = parseAdvocuEventPayload(ev, byId.get(ev.id) || null);
+          if (parsed.id && parsed.title) {
+            byId.set(parsed.id, parsed);
+            if (!parsed.externalUrl || !parsed.cfpUrl.includes('cfpid=')) {
+              liveDiscoveredIds.push(parsed.id);
+            }
+          }
+        }
+        if (pageData?.last || content.length < 50) break;
+      }
+    }
+  } catch {
+    // Use snapshot + public open/events enrichment below
+  }
+
+  // Enrich any newly discovered live events via public /open/events/{id} to capture bevyEventUrl & cfpid
+  const toEnrich = liveDiscoveredIds.slice(0, 25);
+  if (toEnrich.length > 0) {
+    await Promise.allSettled(
+      toEnrich.map(async (id) => {
+        const enriched = await fetchAdvocuEventById(id);
+        if (enriched && enriched.id) {
+          byId.set(enriched.id, enriched);
+        }
+      }),
+    );
+  }
+
+  return Array.from(byId.values());
+}
+
+async function fetchAdvocuDiscoverEvents(forceRefresh = false) {
+  if (!forceRefresh && cachedEmeaHubItems && Date.now() - cachedEmeaHubAt < CACHE_TTL_MS) {
+    return {
+      items: cachedEmeaHubItems,
+      sessionActive: lastAdvocuSessionState.active,
+      sessionError: lastAdvocuSessionState.error,
+      lastCheckedAt: lastAdvocuSessionState.lastCheckedAt,
+    };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const advocuRaw = await fetchLiveAdvocuOpenCfpEvents();
+  const advocuCfpMap = new Map();
+
+  for (const item of advocuRaw) {
+    if (!item.title || !item.startDate) continue;
+    const endDate = item.endDate || item.startDate;
+    if (endDate < today) continue;
+    if (item.cfpDeadline && item.cfpDeadline < today) continue;
+    const isInProgress = item.startDate <= today && endDate >= today;
+    const primaryUrl = item.externalUrl || item.cfpUrl;
+    const techFocus = (item.tags || [])
+      .filter(
+        (t) =>
+          !/^(conference|networking|community building|workshop \/ hands-on session)$/i.test(t),
+      )
+      .slice(0, 4)
+      .join(', ');
+
+    advocuCfpMap.set(item.id, {
+      externalId: `advocu-cfp-${item.id}`,
+      title: item.title,
+      campaign: item.campaign || 'DevFest',
+      source: 'Advocu Open CFP',
+      city: item.city,
+      country: item.country || 'Online',
+      startDate: item.startDate,
+      endDate,
+      isInProgress,
+      url: primaryUrl,
+      cfpUrl: item.cfpUrl,
+      cfpStatus: isInProgress ? 'CLOSED' : item.cfpStatus || 'OPEN',
+      cfpDeadline: item.cfpDeadline || '',
+      techFocus,
+      description: item.description || '',
+      eventFormat: item.eventFormat || 'In-Person',
+      expectedAudience: item.expectedAudience || 250,
+      isGdgOnCampus: false,
+      chapterTitle: item.chapterTitle || 'Advocu Open CFP',
+    });
+  }
+
+  const advocuCfps = Array.from(advocuCfpMap.values()).sort((a, b) =>
     a.startDate.localeCompare(b.startDate),
   );
-  const communities = Array.from(commMap.values()).sort((a, b) =>
-    `${a.country} ${a.city} ${a.title}`.localeCompare(`${b.country} ${b.city} ${b.title}`),
-  );
-  const gdgChapters = Array.from(gdgMap.values()).sort((a, b) =>
-    `${a.country} ${a.city} ${a.title}`.localeCompare(`${b.country} ${b.city} ${b.title}`),
-  );
 
-  const combined = [...conferences, ...communities, ...gdgChapters];
-  cachedEmeaHubItems = combined;
+  cachedEmeaHubItems = advocuCfps;
   cachedEmeaHubAt = Date.now();
-  return combined;
+  return {
+    items: advocuCfps,
+    sessionActive: lastAdvocuSessionState.active,
+    sessionError: lastAdvocuSessionState.error,
+    lastCheckedAt: lastAdvocuSessionState.lastCheckedAt,
+  };
 }
 
 function findAndFormatExpert(experts, { name = '', email = '', slug = '' }) {
@@ -1153,6 +1282,17 @@ exports.advocuProxy = functions.https.onRequest(async (req, res) => {
     return;
   }
 
+  // GDE access control: /api/access/check, /api/access/request, /api/access/decide
+  if (req.path.startsWith('/api/access')) {
+    await gdeAccess.handleAccessRoute(req, res, {
+      db,
+      admin,
+      fetchExperts: fetchGdeDirectoryList,
+      getSecret: fetchSecretByName,
+    });
+    return;
+  }
+
   // ===============================================================
   // Option 1 & Option 2: Personal Agent API (/api/agent/*) & SQL Connector (/api/sql)
   // Strictly isolated per authenticated UID and locked to EVENT_COLUMN_SCHEMA
@@ -1183,6 +1323,10 @@ exports.advocuProxy = functions.https.onRequest(async (req, res) => {
         error:
           'Unauthorized: Provide a valid Personal Agent Token (Bearer gde_pat_...) or Firebase ID Token.',
       });
+      return;
+    }
+    if (!(await gdeAccess.hasGdeAccess(db, uid))) {
+      res.status(403).json({ ok: false, error: 'GDE access has not been approved for this account.' });
       return;
     }
 
@@ -1363,23 +1507,29 @@ exports.advocuProxy = functions.https.onRequest(async (req, res) => {
 
   const subPath = req.path.replace(/^\/api\/advocu\/?/, '');
 
-  // 0a. /api/advocu/extract-event: Fetch an Event/CFP URL and distill title, dates, city, country, campaign, cfpPlatform using Gemini 3.8 Flash + JSON-LD/HTML baseline
+  // Every /api/advocu/* route requires a signed-in Google user with approved GDE access (except self-delete)
+  const advocuCaller = await gdeAccess.verifyGoogleUser(req, admin);
+  if (!advocuCaller) {
+    res.status(401).json({ ok: false, error: 'Sign in with Google first.' });
+    return;
+  }
+  if (
+    !(subPath === 'profile' && req.method === 'DELETE') &&
+    !(await gdeAccess.hasGdeAccess(db, advocuCaller.uid))
+  ) {
+    res.status(403).json({ ok: false, error: 'GDE access has not been approved for this account.' });
+    return;
+  }
+
+  // 0a. /api/advocu/extract-event: Fetch an Event/CFP URL and distill title, dates, city, country, campaign, cfpPlatform, sessionTitle using Advocu API + Gemini 3.8 Flash + JSON-LD/HTML baseline
   if (subPath === 'extract-event') {
     const rawUrl = String(req.query.url || req.body?.url || '').trim();
+    const speaker = String(req.query.speaker || req.body?.speaker || '').trim();
     if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) {
       res.status(400).json({ ok: false, error: 'Provide a valid http(s) Event URL.' });
       return;
     }
     try {
-      const resp = await fetch(rawUrl, {
-        method: 'GET',
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-          Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-        },
-      });
-      const html = resp.ok ? await resp.text() : '';
       const decodeEntities = (s) =>
         String(s || '')
           .replace(/&amp;/g, '&')
@@ -1398,8 +1548,60 @@ exports.advocuProxy = functions.https.onRequest(async (req, res) => {
       let country = '';
       let campaign = '';
       let cfpPlatform = '';
+      let sessionTitle = '';
+      let resolvedCfpUrl = rawUrl;
+      let resolvedEventUrl = rawUrl;
       let aiDistilled = false;
       let gatherSummary = '';
+
+      // 0a-1. Advocu Event/CFP SPA URL support (app.advocu.com/public/gde/events/<id> or app.advocu.com/events/<id>)
+      const advocuMatch = rawUrl.match(
+        /https?:\/\/app\.advocu\.com\/(?:(?:public\/)?[^/?#]+\/)?events\/([a-f0-9]{24})/i,
+      );
+      if (advocuMatch) {
+        cfpPlatform = 'Advocu';
+        const advEvent = await fetchAdvocuEventById(advocuMatch[1]);
+        if (advEvent) {
+          if (advEvent.title) title = decodeEntities(advEvent.title);
+          if (advEvent.startDate) startDate = advEvent.startDate;
+          if (advEvent.endDate) endDate = advEvent.endDate;
+          if (advEvent.city) city = decodeEntities(advEvent.city);
+          if (advEvent.country) country = decodeEntities(advEvent.country);
+          if (advEvent.campaign) campaign = advEvent.campaign;
+          if (advEvent.cfpUrl) resolvedCfpUrl = advEvent.cfpUrl;
+          if (advEvent.externalUrl) resolvedEventUrl = advEvent.externalUrl;
+          gatherSummary = [
+            `Advocu Event ID: ${advEvent.id}`,
+            `Event Name: ${advEvent.title}`,
+            `Start ISO: ${advEvent.startDate}`,
+            `End ISO: ${advEvent.endDate}`,
+            `City: ${advEvent.city}`,
+            `Country: ${advEvent.country}`,
+            `Chapter: ${advEvent.chapterTitle}`,
+            `External Event URL: ${advEvent.externalUrl}`,
+            `Description: ${advEvent.description}`,
+          ].join('\n');
+        }
+      }
+
+      const fetchTargetUrl =
+        advocuMatch && resolvedEventUrl !== rawUrl ? resolvedEventUrl : rawUrl;
+      let html = '';
+      if (!advocuMatch || fetchTargetUrl !== rawUrl) {
+        try {
+          const resp = await fetch(fetchTargetUrl, {
+            method: 'GET',
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+              Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+            },
+          });
+          html = resp.ok ? await resp.text() : '';
+        } catch {
+          html = '';
+        }
+      }
 
       // 0b. Google Gather Platform SPA support (cloudonair.withgoogle.com/events/<slug>, rsvp.withgoogle.com/events/<slug>, etc.)
       const gatherMatch = rawUrl.match(/^https?:\/\/([^/]*withgoogle\.com)\/events\/([^/?#]+)/i);
@@ -1592,6 +1794,8 @@ exports.advocuProxy = functions.https.onRequest(async (req, res) => {
           const prompt = `You are an event metadata extractor for Google Developer Experts (GDEs).
 Distill the conference/event details from the following webpage URL, metadata, and text.
 URL: ${rawUrl}
+Resolved External Event URL: ${resolvedEventUrl}
+Speaker Name (optional): ${speaker}
 Detected Title: ${title || ogTitle}
 Detected Start Date: ${startDate}
 Detected End Date: ${endDate}
@@ -1606,7 +1810,8 @@ Return a JSON object with:
 - city: City name where the event takes place (strip venue/university/stadium/hotel names like "PGE Narodowy" and return the actual city name like "Warsaw", or "Online" if virtual)
 - country: Country name in English (e.g., "Germany", "Poland", "Türkiye", "United Kingdom", "United States", "Kazakhstan", "Online")
 - campaign: One of ["DevFest", "Build with AI", "I/O Extended", "GDG", "3rd-Party"]
-- cfpPlatform: One of ["Sessionize", "Advocu", "Google Forms", "Bevy / GDG", "Other"]`;
+- cfpPlatform: One of ["Sessionize", "Advocu", "Google Forms", "Bevy / GDG", "Other"]
+- sessionTitle: If Speaker Name ("${speaker}") is listed on the event agenda or page with a talk/session title, return their talk/session title; otherwise empty string`;
 
           const geminiResp = await fetch(
             `https://aiplatform.googleapis.com/v1/projects/${GCP_PROJECT_ID}/locations/global/publishers/google/models/${GEMINI_MODEL}:generateContent`,
@@ -1637,6 +1842,7 @@ Return a JSON object with:
                         type: 'STRING',
                         enum: ['Sessionize', 'Advocu', 'Google Forms', 'Bevy / GDG', 'Other'],
                       },
+                      sessionTitle: { type: 'STRING' },
                     },
                     required: [
                       'title',
@@ -1646,6 +1852,7 @@ Return a JSON object with:
                       'country',
                       'campaign',
                       'cfpPlatform',
+                      'sessionTitle',
                     ],
                   },
                 },
@@ -1668,7 +1875,8 @@ Return a JSON object with:
               if (ai.city) city = String(ai.city).trim();
               if (ai.country) country = String(ai.country).trim();
               if (ai.campaign) campaign = String(ai.campaign).trim();
-              if (ai.cfpPlatform) cfpPlatform = String(ai.cfpPlatform).trim();
+              if (ai.cfpPlatform && !advocuMatch) cfpPlatform = String(ai.cfpPlatform).trim();
+              if (ai.sessionTitle) sessionTitle = String(ai.sessionTitle).trim();
               aiDistilled = true;
             }
           }
@@ -1680,7 +1888,7 @@ Return a JSON object with:
       res.status(200).json({
         ok: true,
         aiDistilled,
-        model: aiDistilled ? GEMINI_MODEL : 'html-metadata',
+        model: aiDistilled ? GEMINI_MODEL : advocuMatch ? 'advocu-api' : 'html-metadata',
         url: rawUrl,
         extracted: {
           title,
@@ -1689,7 +1897,10 @@ Return a JSON object with:
           city,
           country,
           campaign,
-          cfpPlatform,
+          cfpPlatform: advocuMatch ? 'Advocu' : cfpPlatform,
+          sessionTitle,
+          cfpUrl: resolvedCfpUrl,
+          eventUrl: resolvedEventUrl,
         },
       });
     } catch (err) {
@@ -1704,20 +1915,81 @@ Return a JSON object with:
     return;
   }
 
-  // 0a. /api/advocu/emea-hub-events: Live EMEA Conferences, Non-GDG Communities & GDG Chapters from Google Sheet
-  if (subPath === 'emea-hub-events') {
+  // 0a. /api/advocu/discover-events (and /api/advocu/emea-hub-events): Live Advocu OpenCFP & Events feed via Advocu Session + Public API
+  if (subPath === 'discover-events' || subPath === 'emea-hub-events') {
     try {
-      const items = await fetchEmeaHubSheetEvents();
+      const force = req.query.refresh === '1' || req.query.force === 'true';
+      const result = await fetchAdvocuDiscoverEvents(force);
       res.status(200).json({
         ok: true,
-        spreadsheetId: EMEA_HUB_SPREADSHEET_ID,
-        count: items.length,
-        items,
+        source: 'advocu-opencfp',
+        communityId: ADVOCU_COMMUNITY_ID,
+        sessionActive: result.sessionActive,
+        sessionError: result.sessionError,
+        lastCheckedAt: result.lastCheckedAt,
+        count: result.items.length,
+        items: result.items,
       });
     } catch (err) {
-      console.error('[EMEA Hub] Error fetching sheet events:', err);
-      res.status(502).json({ ok: false, error: 'Failed to load EMEA Hub events.', items: [] });
+      console.error('[Advocu Discover] Error fetching Advocu OpenCFP events:', err);
+      res.status(502).json({ ok: false, error: 'Failed to load Advocu OpenCFP events.', items: [] });
     }
+    return;
+  }
+
+  // 0a-2. /api/advocu/session-token: Validate & rotate a fresh Advocu Keycloak refresh_token into GCP Secret Manager (shared with AI Janise)
+  if (subPath === 'session-token') {
+    if (req.method === 'GET') {
+      await getAdvocuKeycloakAccessToken();
+      res.status(200).json({
+        ok: true,
+        sessionActive: lastAdvocuSessionState.active,
+        sessionError: lastAdvocuSessionState.error,
+        lastCheckedAt: lastAdvocuSessionState.lastCheckedAt,
+      });
+      return;
+    }
+    if (req.method !== 'POST') {
+      res.status(405).json({ ok: false, error: 'Use GET or POST.' });
+      return;
+    }
+    const uid = await verifyRequestFirebaseUid(req);
+    if (!uid) {
+      res.status(401).json({ ok: false, error: 'Sign in with Google first to update the Advocu session token.' });
+      return;
+    }
+    let rawToken = String(req.body?.refreshToken || req.body?.token || '').trim();
+    if (rawToken.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(rawToken);
+        rawToken = String(parsed.refresh_token || parsed.refreshToken || '').trim();
+      } catch {
+        // treat as raw string
+      }
+    }
+    const m = rawToken.match(/"refresh_token"\s*:\s*"([^"]+)"/);
+    if (m) rawToken = m[1].trim();
+    if (!rawToken) {
+      res.status(400).json({ ok: false, error: 'Provide a valid Advocu refresh_token.' });
+      return;
+    }
+    const accessToken = await getAdvocuKeycloakAccessToken(rawToken);
+    if (!accessToken) {
+      res.status(400).json({
+        ok: false,
+        sessionActive: false,
+        error: lastAdvocuSessionState.error || 'Advocu rejected this refresh_token.',
+      });
+      return;
+    }
+    const refreshed = await fetchAdvocuDiscoverEvents(true);
+    res.status(200).json({
+      ok: true,
+      sessionActive: true,
+      count: refreshed.items.length,
+      items: refreshed.items,
+      message: `Advocu session refreshed & rotated in Secret Manager (${refreshed.items.length} upcoming OpenCFP events synced).`,
+    });
     return;
   }
 

@@ -1,15 +1,20 @@
 import {
   type AuthSession,
+  type GdeAccessStatus,
+  checkGdeAccess,
   deleteUserAccountAndData,
   fetchOrCreateCloudProfile,
   generatePersonalAgentToken,
+  getCachedGdeAccessStatus,
   getSavedAgentToken,
   getSavedSession,
+  isGdeAccessAllowed,
   loadLocalEvents,
   loadLocalProfile,
   persistDirectoryEnrichment,
   persistProfile,
   removeEvent,
+  requestGdeAccess,
   revokePersonalAgentToken,
   signInWithGoogle,
   signOutUser,
@@ -43,12 +48,16 @@ import {
   renderKpisAndItinerary,
   renderTravelPlanner,
 } from './travelPlanner.ts';
+import {
+  initDeckStudioModule,
+  renderDeckStudioModule,
+} from './deckStudio.ts';
 
 let currentSession: AuthSession | null = null;
 let currentProfile: GdeProfile = { ...DEFAULT_ANDRES_PROFILE };
 let events: GdeEvent[] = [];
 let unsubscribeEvents: (() => void) | null = null;
-let activeWorkspaceModule: 'pulse' | 'travel' = 'pulse';
+let activeWorkspaceModule: 'pulse' | 'travel' | 'deck' = 'pulse';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
@@ -247,12 +256,13 @@ document.addEventListener('click', (e) => {
   }
 });
 
-function switchWorkspaceModule(mod: 'pulse' | 'travel'): void {
+function switchWorkspaceModule(mod: 'pulse' | 'travel' | 'deck'): void {
   const travelEnabled = currentProfile.travelPlannerEnabled !== false;
   activeWorkspaceModule = mod === 'travel' && !travelEnabled ? 'pulse' : mod;
 
   const pulseContainer = $('pulseHostModuleContainer');
   const travelContainer = $('travelPlannerModuleContainer');
+  const deckContainer = $('deckStudioModuleContainer');
   const addEventBtn = $('btnOpenAddEvent');
   const travelTabBtn = $('btnSwitchModuleTravel');
   const productTitle = $('topbarProductTitle');
@@ -267,18 +277,116 @@ function switchWorkspaceModule(mod: 'pulse' | 'travel'): void {
 
   pulseContainer.hidden = activeWorkspaceModule !== 'pulse';
   travelContainer.hidden = activeWorkspaceModule !== 'travel';
+  deckContainer.hidden = activeWorkspaceModule !== 'deck';
   addEventBtn.hidden = activeWorkspaceModule !== 'travel' || $('dashboardView').hidden;
-  productTitle.textContent =
-    activeWorkspaceModule === 'travel' ? 'GDE Pulse · Travel Planner' : 'GDE Pulse';
 
-  if (activeWorkspaceModule === 'pulse') {
-    renderPulseHostModule();
-  } else {
+  if (activeWorkspaceModule === 'travel') {
+    productTitle.textContent = 'GDE Pulse · Travel Planner';
     renderTravelPlanner();
+  } else if (activeWorkspaceModule === 'deck') {
+    productTitle.textContent = 'GDE Deck Studio';
+    renderDeckStudioModule();
+  } else {
+    productTitle.textContent = 'GDE Pulse';
+    renderPulseHostModule();
   }
 }
 
-function switchScreen(screen: 'welcome' | 'config' | 'dashboard'): void {
+type AccessGateState = 'checking' | 'unverified' | 'pending' | 'blocked' | 'error';
+
+const ACCESS_GATE_COPY: Record<AccessGateState, { title: string; message: string }> = {
+  checking: {
+    title: 'Validating your GDE profile…',
+    message: 'Searching the GDE directory for a 90% match on your profile name and email.',
+  },
+  unverified: {
+    title: 'Unable to validate',
+    message:
+      'We could not find a 90% match for your profile in the GDE directory. Click below to ask for access.',
+  },
+  pending: {
+    title: 'Request sent',
+    message: "You'll get an email as soon as your access is allowed.",
+  },
+  blocked: { title: 'Access blocked', message: "This account can't access GDE Pulse." },
+  error: {
+    title: "Couldn't check your GDE status",
+    message: 'Please check your connection and try again.',
+  },
+};
+
+function showAccessGate(state: AccessGateState): void {
+  document.documentElement.dataset.screen = 'access';
+  document.documentElement.dataset.theme = 'midnight';
+  $('welcomeView').hidden = true;
+  $('appHeader').hidden = true;
+  $('launchpadView').hidden = true;
+  $('configView').hidden = true;
+  $('dashboardView').hidden = true;
+  const view = $('accessView');
+  view.hidden = false;
+  view.dataset.accessState = state;
+  $('accessTitle').textContent = ACCESS_GATE_COPY[state].title;
+  $('accessMessage').textContent = ACCESS_GATE_COPY[state].message;
+  $('accessRequestForm').hidden = state !== 'unverified';
+  $('btnAccessRetry').hidden = state !== 'error';
+}
+
+/** Returns true when the signed-in user has validated/approved GDE access; otherwise shows the access screen. */
+async function ensureGdeAccess(session: AuthSession): Promise<boolean> {
+  const cachedAllowed = isGdeAccessAllowed(getCachedGdeAccessStatus(session.uid));
+  if (!cachedAllowed) showAccessGate('checking');
+  let status: GdeAccessStatus | null = null;
+  try {
+    const localProf = loadLocalProfile(session.uid);
+    status = (
+      await checkGdeAccess(session.uid, {
+        email: localProf.email || session.email,
+        displayName: localProf.displayName || session.displayName,
+      })
+    ).status;
+  } catch {
+    // Offline: keep a previously approved user going (Firestore rules still enforce access)
+    if (!cachedAllowed && currentSession?.uid === session.uid) showAccessGate('error');
+    return cachedAllowed;
+  }
+  if (currentSession?.uid !== session.uid) return false;
+  if (isGdeAccessAllowed(status)) return true;
+  showAccessGate(status as AccessGateState);
+  return false;
+}
+
+function wireAccessGateEvents(): void {
+  $<HTMLFormElement>('accessRequestForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const session = currentSession;
+    if (!session) return;
+    const btn = $<HTMLButtonElement>('btnRequestAccess');
+    btn.disabled = true;
+    try {
+      const res = await requestGdeAccess(
+        session.uid,
+        $<HTMLInputElement>('accessProfileLink').value.trim(),
+      );
+      if (currentSession?.uid !== session.uid) return;
+      if (isGdeAccessAllowed(res.status)) {
+        window.location.reload();
+        return;
+      }
+      showAccessGate(res.status as AccessGateState);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not send your request.');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $('btnAccessRetry').addEventListener('click', () => window.location.reload());
+  $('btnAccessSignOut').addEventListener('click', () => {
+    void signOutUser();
+  });
+}
+
+function switchScreen(screen: 'welcome' | 'launchpad' | 'config' | 'dashboard'): void {
   document.documentElement.dataset.screen = screen;
   if (screen === 'welcome') {
     document.documentElement.dataset.theme = 'midnight';
@@ -289,11 +397,17 @@ function switchScreen(screen: 'welcome' | 'config' | 'dashboard'): void {
   }
 
   $('welcomeView').hidden = screen !== 'welcome';
+  $('accessView').hidden = true;
   $('appHeader').hidden = screen === 'welcome';
+  $('launchpadView').hidden = screen !== 'launchpad';
   $('configView').hidden = screen !== 'config';
   $('dashboardView').hidden = screen !== 'dashboard';
 
-  if (screen === 'config') {
+  if (screen === 'launchpad') {
+    renderHeader();
+    $('btnOpenAddEvent').hidden = true;
+    $('topbarProductTitle').textContent = 'GDE Suite Hub';
+  } else if (screen === 'config') {
     renderHeader();
     $('btnOpenAddEvent').hidden = true;
     populateConfigForm(currentProfile);
@@ -572,13 +686,25 @@ function wireHostShellEvents(): void {
   $('headerModuleSwitcher').addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-workspace-module]');
     if (!btn) return;
-    const mod = (btn.dataset.workspaceModule as 'pulse' | 'travel') || 'pulse';
+    const mod = (btn.dataset.workspaceModule as 'pulse' | 'travel' | 'deck') || 'pulse';
     if ($('dashboardView').hidden) {
       activeWorkspaceModule = mod;
       switchScreen('dashboard');
     } else {
       switchWorkspaceModule(mod);
     }
+  });
+
+  $('launchpadView').addEventListener('click', (e) => {
+    const card = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-launch-module]');
+    if (!card) return;
+    const mod = (card.dataset.launchModule as 'pulse' | 'travel' | 'deck') || 'pulse';
+    activeWorkspaceModule = mod;
+    switchScreen('dashboard');
+  });
+
+  $('btnOpenLaunchpadHub').addEventListener('click', () => {
+    switchScreen('launchpad');
   });
 
   $('btnOpenCreatorModal').addEventListener('click', () => {
@@ -780,6 +906,7 @@ if (isParticipantPortal()) {
   initParticipantPortal(escapeHtml, showToast);
 } else {
   wireHostShellEvents();
+  wireAccessGateEvents();
 
   initPulseHostModule({
     getSession: () => currentSession,
@@ -805,13 +932,22 @@ if (isParticipantPortal()) {
     },
   });
 
+  initDeckStudioModule({
+    getProfile: () => currentProfile,
+    showToast,
+    escapeHtml,
+  });
+
   const initialCachedSession = getSavedSession();
-  if (initialCachedSession) {
+  if (
+    initialCachedSession &&
+    isGdeAccessAllowed(getCachedGdeAccessStatus(initialCachedSession.uid))
+  ) {
     currentSession = initialCachedSession;
     currentProfile = loadLocalProfile(initialCachedSession.uid);
     events = loadLocalEvents(initialCachedSession.uid);
     bindPulseHostSession(initialCachedSession);
-    switchScreen(currentProfile.configured ? 'dashboard' : 'config');
+    switchScreen('launchpad');
   }
 
   watchAuth(async (session) => {
@@ -829,6 +965,10 @@ if (isParticipantPortal()) {
       return;
     }
 
+    // GDE access control: validate against the GDE directory or wait for admin approval
+    if (!(await ensureGdeAccess(session))) return;
+    if (currentSession?.uid !== session.uid) return;
+
     const cachedProfile = loadLocalProfile(session.uid);
     const cachedEvents = loadLocalEvents(session.uid);
     if (cachedEvents.length > 0 && events.length === 0) {
@@ -836,8 +976,8 @@ if (isParticipantPortal()) {
     }
     if (cachedProfile.configured) {
       currentProfile = cachedProfile;
-      if ($('dashboardView').hidden && $('configView').hidden) {
-        switchScreen('dashboard');
+      if ($('dashboardView').hidden && $('configView').hidden && $('launchpadView').hidden) {
+        switchScreen('launchpad');
       } else {
         renderHeader();
       }
@@ -854,18 +994,20 @@ if (isParticipantPortal()) {
     if (currentSession?.uid !== session.uid) return;
     currentProfile = profile;
 
-    if (!isConfigured) {
-      switchScreen('config');
-    } else if ($('dashboardView').hidden && $('configView').hidden) {
-      switchScreen('dashboard');
+    if ($('dashboardView').hidden && $('configView').hidden) {
+      switchScreen('launchpad');
     } else {
       renderHeader();
       if (!$('configView').hidden) {
         populateConfigForm(currentProfile);
-      } else {
+      } else if (
+        !$('dashboardView').hidden &&
+        !(activeWorkspaceModule === 'deck' && $('deckStudioModuleContainer').children.length > 0)
+      ) {
         switchWorkspaceModule(activeWorkspaceModule);
       }
     }
+    void isConfigured;
 
     void fetchGdeDirectoryProfile(
       currentProfile.displayName || session.displayName,

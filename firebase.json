@@ -39,6 +39,26 @@
         "**/node_modules/**",
         "functions/**"
       ],
+      "headers": [
+        {
+          "source": "/index.html",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        }
+      ],
       "rewrites": [
         {
           "source": "/api/advocu/**",
@@ -61,6 +81,17 @@
           "function": "advocuProxy"
         },
         {
+          "source": "/api/access/**",
+          "function": "advocuProxy"
+        },
+        {
+          "source": "/api/pptx/**",
+          "run": {
+            "serviceId": "gde-stage-pptx-studio",
+            "region": "us-central1"
+          }
+        },
+        {
           "source": "**",
           "destination": "/index.html"
         }
@@ -74,6 +105,26 @@
         "**/.*",
         "**/node_modules/**",
         "functions/**"
+      ],
+      "headers": [
+        {
+          "source": "/index.html",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        }
       ],
       "rewrites": [
         {

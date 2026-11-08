@@ -10,10 +10,12 @@ import {
   extractEventFromUrl,
   fetchLiveGdgEvents,
   getSpeakerMatchingSessions,
+  lastAdvocuDiscoverStatus,
   OFFLINE_DEVFEST_FALLBACK,
   parseAdvocuMyEventsTable,
   parseSmartImport,
   submitToAdvocu,
+  updateAdvocuSessionToken,
 } from './integrations.ts';
 import {
   type ActivityType,
@@ -618,11 +620,28 @@ export function renderDiscover(): void {
   const grid = $('discoverList');
   const fallbackRegion = currentProfile.homeRegion || 'Europe';
 
+  const statusChip = document.getElementById('advocuSessionStatusChip');
+  if (statusChip) {
+    if (lastAdvocuDiscoverStatus.sessionActive) {
+      statusChip.className = 'chip chip-green';
+      statusChip.textContent = '● Live Advocu Session Active';
+    } else {
+      statusChip.className = 'chip chip-amber';
+      statusChip.textContent = '⚠ Session Token Expired · Public API Active';
+    }
+  }
+
   const items = discoveredEvents.filter((d) => {
     const evRegion = d.region || resolveRegion(d.country, fallbackRegion, d.countryCode);
-    const evSource = d.source || 'Live GDG';
+    const evCampaign = d.campaign || 'GDG';
     if (regionFilter !== 'ALL' && evRegion !== regionFilter) return false;
-    if (activeDiscoverSource !== 'ALL' && evSource !== activeDiscoverSource) return false;
+    if (
+      activeDiscoverSource !== 'ALL' &&
+      evCampaign !== activeDiscoverSource &&
+      d.source !== activeDiscoverSource
+    ) {
+      return false;
+    }
     if (
       query &&
       !`${d.title} ${d.city} ${d.country} ${d.chapterTitle} ${d.techFocus || ''} ${d.description || ''}`
@@ -667,13 +686,15 @@ export function renderDiscover(): void {
       }
 
       const sourceBadgeLabel =
-        d.source === 'EMEA Conference'
-          ? '3rd-Party Conf'
-          : d.source === 'Non-GDG Community'
-            ? 'Non-GDG Community'
-            : d.source === 'EMEA GDG Chapter'
-              ? 'GDG Chapter'
-              : d.campaign;
+        d.source === 'Advocu Open CFP'
+          ? 'Advocu CFP'
+          : d.source === 'EMEA Conference'
+            ? '3rd-Party Conf'
+            : d.source === 'Non-GDG Community'
+              ? 'Non-GDG Community'
+              : d.source === 'EMEA GDG Chapter'
+                ? 'GDG Chapter'
+                : d.campaign;
 
       const itineraryStatusChip =
         match.matchedStatus === 'Confirmed'
@@ -703,14 +724,17 @@ export function renderDiscover(): void {
           /^\d{4}-\d{2}-\d{2}$/.test(d.cfpDeadline) &&
           d.cfpDeadline >= todayLocal,
       );
-      const isCfpOpen = d.cfpStatus === 'OPEN' && !isInProgress && hasFutureDeadline;
+      const isCfpOpen =
+        d.cfpStatus === 'OPEN' &&
+        !isInProgress &&
+        (hasFutureDeadline || (d.source === 'Advocu Open CFP' && !d.cfpDeadline));
 
       const inProgressChip = isInProgress
         ? `<span class="chip chip-neutral">Happening now</span>`
         : '';
 
       const cfpChip = isCfpOpen
-        ? `<span class="chip chip-green">CFP OPEN &middot; closes ${escapeHtml(d.cfpDeadline || '')}</span>`
+        ? `<span class="chip chip-green">CFP OPEN${d.cfpDeadline ? ` &middot; closes ${escapeHtml(d.cfpDeadline)}` : ''}</span>`
         : '';
 
       const techChip = d.techFocus
@@ -723,9 +747,8 @@ export function renderDiscover(): void {
           : d.startDate
         : d.cadence || d.chapterTitle;
 
-      const hasSeparateCfp = Boolean(
-        d.cfpUrl && d.cfpUrl !== d.url && d.cfpStatus !== 'CLOSED' && !isInProgress,
-      );
+      const advocuCfpUrl = d.cfpUrl || d.url;
+      const hasExternalEventPage = Boolean(d.url && d.cfpUrl && d.url !== d.cfpUrl);
       const addButtonLabel =
         match.matchedStatus === 'Confirmed'
           ? '&#10003; Confirmed (+ Session)'
@@ -740,20 +763,20 @@ export function renderDiscover(): void {
               ${monthYearChip}
               ${itineraryStatusChip}
               ${clashChips}
-              <span class="chip chip-neutral">${escapeHtml(sourceBadgeLabel)}</span>
+              <span class="chip chip-neutral">${escapeHtml(d.campaign || sourceBadgeLabel)}</span>
               ${inProgressChip}
               ${cfpChip}
               ${techChip}
             </div>
             <h3 style="font-size:1.02rem;margin-bottom:4px">${escapeHtml(d.title)}</h3>
-            <p class="muted-sm">${escapeHtml(d.city ? `${d.city}, ` : '')}${escapeHtml(d.country)} &middot; ${dateOrCadence}</p>
+            <p class="muted-sm">${escapeHtml(d.city ? `${d.city}, ` : '')}${escapeHtml(d.country)} &middot; ${dateOrCadence}${d.chapterTitle ? ` &middot; ${escapeHtml(d.chapterTitle)}` : ''}</p>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
             <div style="display:flex;gap:10px;align-items:center">
-              <a href="${escapeHtml(d.url)}" target="_blank" rel="noopener" class="muted-sm">Event Page &nearr;</a>
+              <a href="${escapeHtml(advocuCfpUrl)}" target="_blank" rel="noopener" class="muted-sm" style="color:var(--sky);font-weight:600">Apply on Advocu &nearr;</a>
               ${
-                hasSeparateCfp
-                  ? `<a href="${escapeHtml(d.cfpUrl || '')}" target="_blank" rel="noopener" class="muted-sm" style="color:var(--sky);font-weight:600">CFP Link &nearr;</a>`
+                hasExternalEventPage
+                  ? `<a href="${escapeHtml(d.url)}" target="_blank" rel="noopener" class="muted-sm">Event Page &nearr;</a>`
                   : ''
               }
             </div>
@@ -814,7 +837,9 @@ async function handleEventUrlAutoFill(): Promise<void> {
   try {
     const res = await extractEventFromUrl(rawUrl, ctx.getProfile());
     urlInput.value = res.eventUrl;
+    urlInput.dataset.cfpUrl = res.cfpUrl || res.eventUrl;
     if (res.title) $<HTMLInputElement>('evTitle').value = res.title;
+    if (res.sessionTitle) $<HTMLInputElement>('evSessionTitle').value = res.sessionTitle;
     if (res.startDate) $<HTMLInputElement>('evStartDate').value = res.startDate;
     if (res.endDate) $<HTMLInputElement>('evEndDate').value = res.endDate;
     if (res.city) $<HTMLInputElement>('evCity').value = res.city;
@@ -824,7 +849,7 @@ async function handleEventUrlAutoFill(): Promise<void> {
     $<HTMLSelectElement>('evBudgetUsd').value = String(res.budgetUsd);
 
     statusBanner.textContent = res.ok
-      ? `✓ ${res.message} — Now select or type your Session Name in Step 2.`
+      ? `✓ ${res.message}${res.sessionTitle ? ` · Matched talk: "${res.sessionTitle}"` : ' — Now select or type your Session Name in Step 2.'}`
       : res.message;
 
     $<HTMLInputElement>('evSessionTitle').focus();
@@ -850,7 +875,9 @@ export function openEventModal(ev?: GdeEvent): void {
     ev?.endDate || ev?.startDate || new Date().toISOString().slice(0, 10);
   $<HTMLSelectElement>('evActivityType').value = ev?.activityType || 'Talk';
   $<HTMLSelectElement>('evCfpPlatform').value = ev?.cfpPlatform || 'Sessionize';
-  $<HTMLInputElement>('evEventUrl').value = ev?.eventUrl || ev?.cfpUrl || '';
+  const urlEl = $<HTMLInputElement>('evEventUrl');
+  urlEl.value = ev?.eventUrl || ev?.cfpUrl || '';
+  urlEl.dataset.cfpUrl = ev?.cfpUrl || '';
   $('evUrlStatusBanner').textContent = 'Paste a URL to auto-fill event details';
 
   const bdg =
@@ -1420,7 +1447,7 @@ export function initTravelPlannerModule(context: TravelPlannerContext): void {
       endDate,
       status,
       cfpPlatform: $<HTMLSelectElement>('evCfpPlatform').value as CfpPlatform,
-      cfpUrl: existing?.cfpUrl || publicUrl,
+      cfpUrl: $<HTMLInputElement>('evEventUrl').dataset.cfpUrl || existing?.cfpUrl || publicUrl,
       eventUrl: publicUrl,
       sessionTitle: $<HTMLInputElement>('evSessionTitle').value.trim(),
       activityType: $<HTMLSelectElement>('evActivityType').value as ActivityType,
@@ -1545,6 +1572,50 @@ export function initTravelPlannerModule(context: TravelPlannerContext): void {
   $('discoverSearch').addEventListener('input', renderDiscover);
   $('discoverRegion').addEventListener('change', renderDiscover);
 
+  const btnToggleSession = document.getElementById('btnToggleAdvocuSessionBox');
+  const sessionBox = document.getElementById('advocuSessionRefreshBox');
+  if (btnToggleSession && sessionBox) {
+    btnToggleSession.addEventListener('click', () => {
+      sessionBox.hidden = !sessionBox.hidden;
+      if (!sessionBox.hidden) {
+        $<HTMLInputElement>('advocuRefreshTokenInput').focus();
+      }
+    });
+  }
+
+  const btnSaveSession = document.getElementById('btnSaveAdvocuRefreshToken') as HTMLButtonElement | null;
+  if (btnSaveSession) {
+    btnSaveSession.addEventListener('click', async () => {
+      const input = $<HTMLInputElement>('advocuRefreshTokenInput');
+      const banner = $('advocuSessionStatusBanner');
+      const raw = input.value.trim();
+      if (!raw) {
+        banner.textContent = 'Paste a valid Advocu refresh_token or token JSON first.';
+        return;
+      }
+      btnSaveSession.disabled = true;
+      btnSaveSession.textContent = 'Verifying...';
+      banner.textContent = 'Exchanging refresh_token with accounts.advocu.com & rotating in Secret Manager...';
+      try {
+        const res = await updateAdvocuSessionToken(raw);
+        banner.textContent = res.message;
+        if (res.ok) {
+          input.value = '';
+          if (res.items && res.items.length > 0) {
+            discoveredEvents = res.items;
+          } else {
+            discoveredEvents = await fetchLiveGdgEvents(true);
+          }
+          renderDiscover();
+          ctx.showToast(res.message);
+        }
+      } finally {
+        btnSaveSession.disabled = false;
+        btnSaveSession.textContent = 'Verify & Rotate Token';
+      }
+    });
+  }
+
   $('discoverSourceFilters').addEventListener('click', (e) => {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-discover-source]');
     if (!btn) return;
@@ -1583,13 +1654,16 @@ export function initTravelPlannerModule(context: TravelPlannerContext): void {
       startDate,
       endDate,
       status: 'Considering',
-      cfpPlatform: /sessionize\.com/i.test(d.cfpUrl || d.url)
-        ? 'Sessionize'
-        : /docs\.google\.com\/forms|forms\.gle/i.test(d.cfpUrl || d.url)
-          ? 'Google Forms'
-          : d.source === 'Live GDG' || d.source === 'EMEA GDG Chapter'
-            ? 'Bevy / GDG'
-            : 'Other',
+      cfpPlatform:
+        d.source === 'Advocu Open CFP' || /advocu\.com/i.test(d.cfpUrl || d.url)
+          ? 'Advocu'
+          : /sessionize\.com/i.test(d.cfpUrl || d.url)
+            ? 'Sessionize'
+            : /docs\.google\.com\/forms|forms\.gle/i.test(d.cfpUrl || d.url)
+              ? 'Google Forms'
+              : d.source === 'Live GDG' || d.source === 'EMEA GDG Chapter'
+                ? 'Bevy / GDG'
+                : 'Other',
       cfpUrl: d.cfpUrl || d.url,
       eventUrl: d.url,
       sessionTitle: '',

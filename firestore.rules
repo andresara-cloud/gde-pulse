@@ -154,6 +154,18 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // GDE access control: status is written only by Cloud Functions (functions/gdeAccess.js)
+    function hasGdeAccess() {
+      return isAuthenticated() &&
+             request.auth.token.firebase.sign_in_provider != 'anonymous' &&
+             get(/databases/$(database)/documents/gde_access/$(request.auth.uid)).data.status in ['validated', 'approved'];
+    }
+
+    match /gde_access/{userId} {
+      allow get: if isOwner(userId);
+      allow list, create, update, delete: if false;
+    }
+
     function hasOnlyAllowedFields(allowedFields) {
       return request.resource.data.keys().hasOnly(allowedFields);
     }
@@ -363,10 +375,11 @@ service cloud.firestore {
 
     match /gde_users/{userId} {
       // Strictly isolate user profiles: only owner can get their own doc; collection listing is forbidden
-      allow get: if isOwner(userId);
+      // Reads and writes also require approved GDE access; owners can always delete their own data
+      allow get: if isOwner(userId) && hasGdeAccess();
       allow list: if false;
-      allow create: if isOwner(userId) && isValidGdeUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidGdeUser(request.resource.data);
+      allow create: if isOwner(userId) && hasGdeAccess() && isValidGdeUser(request.resource.data);
+      allow update: if isOwner(userId) && hasGdeAccess() && isValidGdeUser(request.resource.data);
       allow delete: if isOwner(userId);
 
       match /secrets/{secretId} {
@@ -374,9 +387,10 @@ service cloud.firestore {
       }
 
       match /events/{eventId} {
-        allow read: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidGdeEvent(request.resource.data);
+        allow read: if isOwner(userId) && hasGdeAccess();
+        allow create: if isOwner(userId) && hasGdeAccess() && isValidGdeEvent(request.resource.data);
         allow update: if isOwner(userId) &&
+                      hasGdeAccess() &&
                       isValidGdeEvent(request.resource.data) &&
                       (!('id' in request.resource.data) ||
                        !('id' in resource.data) ||
@@ -464,9 +478,11 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isAuthenticated() &&
                     request.auth.token.firebase.sign_in_provider != 'anonymous' &&
+                    hasGdeAccess() &&
                     request.resource.data.ownerUid == request.auth.uid &&
                     isValidPulseQuiz(request.resource.data);
       allow update: if isAuthenticated() &&
+                    hasGdeAccess() &&
                     resource.data.ownerUid == request.auth.uid &&
                     request.resource.data.ownerUid == resource.data.ownerUid &&
                     isValidPulseQuiz(request.resource.data);

@@ -5,5 +5,13 @@ dist/
 .env
 .env.local
 .env.*.local
+functions/.env
+functions/.env.*
+**/.env
+**/.env.*
+.admin-email*
 .DS_Store
 *.log
+mushroom_*.png
+mushroom_*.mp4
+*EXTERNAL*Brand*Guide.pptx

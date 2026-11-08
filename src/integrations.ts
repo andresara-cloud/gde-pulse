@@ -21,6 +21,7 @@ import {
 
 export type DiscoverSourceType =
   | 'Live GDG'
+  | 'Advocu Open CFP'
   | 'EMEA Conference'
   | 'Non-GDG Community'
   | 'EMEA GDG Chapter';
@@ -176,7 +177,10 @@ export async function fetchGdeDirectoryProfile(
   try {
     const res = await fetch('/api/advocu/gde-directory', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Firebase-Id-Token': await getFirebaseIdToken(),
+      },
       body: JSON.stringify({ name, email, slug }),
     });
     if (!res.ok) return null;
@@ -483,76 +487,102 @@ export async function syncFromAdvocuKey(
   };
 }
 
+export interface AdvocuDiscoverStatus {
+  sessionActive: boolean;
+  sessionError: string;
+  lastCheckedAt: string;
+}
+
+export let lastAdvocuDiscoverStatus: AdvocuDiscoverStatus = {
+  sessionActive: false,
+  sessionError: '',
+  lastCheckedAt: '',
+};
+
 /**
- * Fetches live upcoming events from gdg.community.dev (Bevy public API, CORS: *)
- * AND live EMEA Conferences, Non-GDG Communities & GDG Chapters from the EMEA Hub Google Sheet.
+ * Fetches live upcoming Advocu OpenCFP & Speaker Matching events from /api/advocu/discover-events
+ * (backed by Advocu's Keycloak session + /open/events/{id} enrichment).
  */
-export async function fetchLiveGdgEvents(): Promise<DiscoveredEvent[]> {
-  const bevyUrl =
-    'https://gdg.community.dev/api/event/?status=Live&fields=id,title,start_date,end_date,url,chapter,event_type_title&page_size=500';
-
-  const [bevyOutcome, sheetOutcome] = await Promise.allSettled([
-    fetch(bevyUrl).then((r) => (r.ok ? r.json() : null)),
-    fetch('/api/advocu/emea-hub-events').then((r) => (r.ok ? r.json() : null)),
-  ]);
-
-  const today = new Date().toISOString().slice(0, 10);
+export async function fetchLiveGdgEvents(forceRefresh = false): Promise<DiscoveredEvent[]> {
   const datedEvents: DiscoveredEvent[] = [];
-  const recurringItems: DiscoveredEvent[] = [];
 
-  if (bevyOutcome.status === 'fulfilled' && bevyOutcome.value) {
-    const rawList: Array<Record<string, any>> = Array.isArray(bevyOutcome.value?.results)
-      ? bevyOutcome.value.results
-      : [];
-
-    for (const item of rawList) {
-      const startDate = String(item.start_date ?? '').slice(0, 10);
-      if (!startDate || startDate < today) continue;
-      const endDate = String(item.end_date ?? startDate).slice(0, 10) || startDate;
-      const chapter = item.chapter ?? {};
-      const countryCode = String(chapter.country || '').trim();
-      const country = String(chapter.country_name || countryCode || '').trim();
-      const city = String(chapter.city || chapter.chapter_location || '').trim();
-      const title = String(item.title || 'GDG Event').trim();
-      const chapterDesc = String(chapter.description || '') + ' ' + String(chapter.title || '');
-      const isGdgOnCampus = /gdg on campus|google developer student clubs|gdsc/i.test(chapterDesc);
-
-      datedEvents.push({
-        externalId: `bevy-${item.id}`,
-        title,
-        campaign: detectCampaign(title, String(item.event_type_title ?? '')),
-        source: 'Live GDG',
-        city,
-        country,
-        countryCode,
-        startDate,
-        endDate,
-        url: String(item.url || 'https://gdg.community.dev'),
-        isGdgOnCampus,
-        chapterTitle: String(chapter.title || `GDG ${city || country}`),
-      });
-    }
-  }
-
-  if (sheetOutcome.status === 'fulfilled' && Array.isArray(sheetOutcome.value?.items)) {
-    for (const raw of sheetOutcome.value.items as DiscoveredEvent[]) {
-      if (raw.startDate) {
-        datedEvents.push(raw);
-      } else {
-        recurringItems.push(raw);
+  try {
+    const endpoint = forceRefresh
+      ? '/api/advocu/discover-events?refresh=1'
+      : '/api/advocu/discover-events';
+    const resp = await fetch(endpoint, {
+      headers: { 'X-Firebase-Id-Token': await getFirebaseIdToken() },
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      lastAdvocuDiscoverStatus = {
+        sessionActive: Boolean(data?.sessionActive),
+        sessionError: String(data?.sessionError || ''),
+        lastCheckedAt: String(data?.lastCheckedAt || ''),
+      };
+      if (Array.isArray(data?.items)) {
+        for (const raw of data.items as DiscoveredEvent[]) {
+          datedEvents.push({
+            ...raw,
+            source: 'Advocu Open CFP',
+          });
+        }
       }
     }
+  } catch {
+    // Fallback below if offline
   }
 
-  const seen = new Set(datedEvents.map((e) => `${e.title.toLowerCase()}-${e.startDate}`));
-  for (const fallback of OFFLINE_DEVFEST_FALLBACK) {
-    if (!seen.has(`${fallback.title.toLowerCase()}-${fallback.startDate}`)) {
-      datedEvents.push({ ...fallback, source: 'Live GDG' });
+  if (datedEvents.length === 0) {
+    for (const fallback of OFFLINE_DEVFEST_FALLBACK) {
+      datedEvents.push({ ...fallback, source: 'Advocu Open CFP' });
     }
   }
 
   datedEvents.sort((a, b) => a.startDate.localeCompare(b.startDate));
-  return [...datedEvents, ...recurringItems];
+  return datedEvents;
+}
+
+export async function updateAdvocuSessionToken(
+  rawRefreshToken: string,
+): Promise<{ ok: boolean; message: string; items?: DiscoveredEvent[] }> {
+  const clean = rawRefreshToken.trim();
+  if (!clean) {
+    return { ok: false, message: 'Paste your Advocu refresh_token first.' };
+  }
+  try {
+    const idToken = await getFirebaseIdToken();
+    const resp = await fetch('/api/advocu/session-token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'X-Firebase-Id-Token': idToken } : {}),
+      },
+      body: JSON.stringify({ refreshToken: clean }),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data?.ok) {
+      return {
+        ok: false,
+        message: String(data?.error || `Advocu session refresh failed (${resp.status})`),
+      };
+    }
+    lastAdvocuDiscoverStatus = {
+      sessionActive: true,
+      sessionError: '',
+      lastCheckedAt: new Date().toISOString(),
+    };
+    return {
+      ok: true,
+      message: String(data.message || 'Advocu session refreshed!'),
+      items: Array.isArray(data.items) ? (data.items as DiscoveredEvent[]) : undefined,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export interface AdvocuDraftOverrides {
@@ -1103,6 +1133,7 @@ export interface ExtractedUrlEventResult {
   model: string;
   message: string;
   title: string;
+  sessionTitle?: string;
   campaign: EventCampaign;
   city: string;
   country: string;
@@ -1123,10 +1154,13 @@ export async function extractEventFromUrl(
   const localParsed = parseSmartImport(url, profile);
 
   let title = localParsed.title || '';
+  let sessionTitle = '';
   let startDate = localParsed.startDate || '';
   let endDate = localParsed.endDate || '';
   let city = '';
   let country = localParsed.country || '';
+  let cfpUrl = url;
+  let eventUrl = url;
   let aiDistilled = false;
   let model = 'html-metadata';
 
@@ -1143,21 +1177,32 @@ export async function extractEventFromUrl(
   let campaign: EventCampaign = detectCampaign(`${title} ${url}`);
 
   try {
-    const resp = await fetch(`/api/advocu/extract-event?url=${encodeURIComponent(url)}`);
+    const speakerParam = profile.displayName
+      ? `&speaker=${encodeURIComponent(profile.displayName)}`
+      : '';
+    const resp = await fetch(
+      `/api/advocu/extract-event?url=${encodeURIComponent(url)}${speakerParam}`,
+      { headers: { 'X-Firebase-Id-Token': await getFirebaseIdToken() } },
+    );
     if (resp.ok) {
       const data = await resp.json();
       const ext = data?.extracted || {};
       if (data?.aiDistilled) {
         aiDistilled = true;
         model = String(data.model || GEMINI_MODEL);
+      } else if (data?.model) {
+        model = String(data.model);
       }
       if (ext.title) title = String(ext.title).trim();
+      if (ext.sessionTitle) sessionTitle = String(ext.sessionTitle).trim();
       if (ext.startDate) startDate = String(ext.startDate).trim();
       if (ext.endDate) endDate = String(ext.endDate).trim();
       if (ext.city) city = String(ext.city).trim();
       if (ext.country) country = String(ext.country).trim();
       if (ext.campaign) campaign = ext.campaign as EventCampaign;
       if (ext.cfpPlatform) cfpPlatform = ext.cfpPlatform as CfpPlatform;
+      if (ext.cfpUrl) cfpUrl = String(ext.cfpUrl).trim();
+      if (ext.eventUrl) eventUrl = String(ext.eventUrl).trim();
     }
   } catch {
     // Fallback to client URL slug parsing
@@ -1165,7 +1210,7 @@ export async function extractEventFromUrl(
 
   const homeCountry = profile.homeCountry || '';
   const inferredLoc = inferCityAndCountryFromTitle(
-    `${title} ${city} ${country} ${url}`,
+    `${title} ${city} ${country} ${eventUrl}`,
     homeCountry,
   );
   if (!city && inferredLoc.city) city = inferredLoc.city;
@@ -1181,7 +1226,7 @@ export async function extractEventFromUrl(
   const region = resolveRegion(country, depRegion);
   const budgetUsd = calculateBudgetUsd(region, depRegion, country, depCountry);
   if (!campaign) {
-    campaign = detectCampaign(`${title} ${url}`);
+    campaign = detectCampaign(`${title} ${eventUrl}`);
   }
 
   const finalTitle = title || 'GDE Event';
@@ -1195,6 +1240,7 @@ export async function extractEventFromUrl(
     model,
     message: `Auto-filled: ${finalTitle} (${locSummary || region} · $${budgetUsd} USD)`,
     title: finalTitle,
+    ...(sessionTitle ? { sessionTitle } : {}),
     campaign,
     city,
     country,
@@ -1202,8 +1248,8 @@ export async function extractEventFromUrl(
     startDate: finalStart,
     endDate: finalEnd,
     cfpPlatform,
-    cfpUrl: url,
-    eventUrl: url,
+    cfpUrl,
+    eventUrl,
     budgetUsd,
   };
 }

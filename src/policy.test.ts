@@ -138,7 +138,7 @@ assert.equal(submittedTooLate.reimbursementState, 'flagged-red');
 const sampleAdvocuTable = `
 DevFest Trabzon 2026
 Call for Papers for Devfest Trabzon 2026
-Democratising AI: Ethical and Responsible Development
+Building Agents with Gemini: From Prototype to Production
 Aug 19, 2026
 Oct 31, 2026
 Accepted
@@ -220,7 +220,7 @@ const speakerSessions = getSpeakerMatchingSessions([
   baseEvent,
   secondSessionSameEvent,
 ]);
-assert.equal(speakerSessions.includes('Democratising AI: Ethical and Responsible Development'), true);
+assert.equal(speakerSessions.includes('Building Agents with Gemini: From Prototype to Production'), true);
 assert.equal(speakerSessions.includes('Prompt to Production: Consistent AI Engineering'), true);
 assert.equal(speakerSessions.includes('Agentic AI with Gemini'), true);
 
@@ -560,7 +560,7 @@ import {
 assert.deepEqual([...PULSE_TIME_LIMIT_OPTIONS], [5, 10, 15, 30, 45, 60]);
 assert.equal(isValidPulseImageUrl(''), false);
 assert.equal(isValidPulseImageUrl('Pro 3.1'), false);
-assert.equal(isValidPulseImageUrl('https://gpulse.web.app/gde-hero.jpg'), true);
+assert.equal(isValidPulseImageUrl('https://gpulse.web.app/gde-banner.jpg'), true);
 assert.equal(isValidPulseImageUrl('data:image/jpeg;base64,/9j/4AAQ'), true);
 assert.equal(normalizePulseTimeLimit(5), 5);
 assert.equal(normalizePulseTimeLimit(10), 10);
@@ -578,4 +578,267 @@ assert.ok(calculatePulseAnswerPoints(true, 7500, 15) >= 700);
 assert.equal(calculatePulseAnswerPoints(true, 20000, 15), 0);
 assert.equal(DEFAULT_ANDRES_PROFILE.travelPlannerEnabled, true);
 
-console.log('✅ All GDE Pulse live quiz, modular Travel Planner, WorkTrips checklist, $600/$800/$1,200 budget, overlap, Advocu My Events parser, Speaker Matching session suggestions, Schema-Locked SQL/Agent engine, Discover region & clash filter, and ±21-day reimbursement checks passed!');
+// Case P: Advocu OpenCFP snapshot & URL external link resolution
+import fs from 'node:fs';
+const advocuSnap = JSON.parse(
+  fs.readFileSync(new URL('../functions/advocu_opencfp_snapshot.json', import.meta.url), 'utf8'),
+);
+assert.ok(Array.isArray(advocuSnap) && advocuSnap.length >= 100, 'Advocu OpenCFP snapshot must contain >100 events');
+const warsawSnap = advocuSnap.find((e: { id: string }) => e.id === '6a9e63804f57bc69c8b411c1');
+assert.ok(warsawSnap, 'Warsaw DevFest must exist in Advocu OpenCFP snapshot');
+assert.equal(warsawSnap.title, 'GDG DevFest 2026 Warsaw');
+assert.ok(
+  String(warsawSnap.externalUrl).includes('gdg.community.dev/events/details/'),
+  'Warsaw DevFest must resolve external Bevy event URL from Advocu API',
+);
+
+// Case Q: GDE Deck Studio distinct OpenXML template architectures & zero legacy template references
+import { compileOpenXmlPptx, BRAND_PRESETS, type PresentationDeckSpec } from './pptxOpenXml.ts';
+
+const presetStyles = BRAND_PRESETS.map((theme) => theme.templateStyle);
+assert.deepEqual(
+  presetStyles,
+  ['gde-2026-navy', 'gde-2026-light-pills', 'cloud-blueprint', 'devfest-split', 'build-with-ai-terminal'],
+  'All 5 distinct slide template presets must be registered',
+);
+
+const compiledSizes = new Set<number>();
+for (const brand of BRAND_PRESETS) {
+  const spec: PresentationDeckSpec = {
+    productName: 'GDE Deck Studio',
+    deckTitle: `Test Deck ${brand.id}`,
+    deckSubtitle: 'OpenXML Template Verification',
+    presenterName: 'Andre Sara',
+    gdeCategory: 'Cloud & AI',
+    brand,
+    slides: [
+      {
+        id: 'slide-1',
+        sectionTag: '01 // OVERVIEW',
+        title: 'Distinct Slide Architecture Check',
+        subtitle: 'OpenXML Template Verification',
+        layout: 'editorial-split',
+        cards: [
+          { badge: '01', heading: 'First Point', bullets: ['Detail A', 'Detail B'], metric: '86%' },
+          { badge: '02', heading: 'Second Point', bullets: ['Detail C', 'Detail D'], metric: '14%' },
+          { badge: '03', heading: 'Third Point', bullets: ['Detail E', 'Detail F'], metric: '99%' },
+        ],
+        visualPrompt: 'Technical diagram',
+        takeaway: 'Bottom summary line',
+        speakerNotes: 'Speaker notes for slide 1.',
+      },
+    ],
+  };
+  const bytes = compileOpenXmlPptx(spec);
+  assert.equal(bytes[0], 0x50, 'PPTX must start with PK zip signature (P)');
+  assert.equal(bytes[1], 0x4b, 'PPTX must start with PK zip signature (K)');
+  const rawAscii = new TextDecoder('latin1').decode(bytes);
+  assert.ok(!rawAscii.includes('PILLAR 01'), `Template ${brand.id} must not render legacy PILLAR 01 white boxes`);
+  assert.ok(!rawAscii.includes('KEY TAKEAWAY //'), `Template ${brand.id} must not render legacy KEY TAKEAWAY // banner`);
+  compiledSizes.add(bytes.byteLength);
+}
+assert.equal(compiledSizes.size, 5, 'Each of the 5 templates must compile a structurally distinct OpenXML slide geometry');
+
+// Case R: End-to-End Sample Deck (2026 GDE Brand Guide) Conversion, Keep Existing Brand, & Add New Slide Regression Tests
+import { parseUploadedPptxFile } from './pptxOpenXml.ts';
+import {
+  KEEP_EXISTING_BRAND_ID,
+  applyDefaultSampleDeckToStudioState,
+  applyUploadedPptxDeckToStudioState,
+  buildKeepExistingBrandSpec,
+  convertParsedPptxToBrandDeck,
+  detectMarkdownSlideCount,
+  formatGeneratingTimerLabel,
+  formatSlideBodyTextFromCards,
+  getDeckStudioStateSnapshot,
+  insertNewSlideAfterIndex,
+  mergeSlidePairsInDeck,
+  parseMarkdownIntoSlides,
+  parseMergePairsText,
+  parseSlideBodyTextIntoCards,
+  removeSlidesByIndicesInDeck,
+  resolveGoogleDriveSlideTabUrl,
+} from './deckStudio.ts';
+
+// Verify initial un-uploaded Deck Studio state (no preloaded 24 slides before upload; default Keep Existing Deck Template)
+const initialSnap = getDeckStudioStateSnapshot();
+assert.equal(initialSnap.sourceUploaded, false, 'Deck Studio must not mark a deck uploaded before user action');
+assert.equal(initialSnap.slideCount, 2, 'Initial Deck Studio state must start with 2 starter slides, not 24 preloaded slides');
+assert.equal(initialSnap.targetSlideCount, 2, 'Initial Target Slide Count must match the 2 starter slides before upload');
+assert.equal(initialSnap.brandId, KEEP_EXISTING_BRAND_ID, 'Default Step 2 brand preset must be keep-existing-brand');
+assert.equal(initialSnap.brandName, 'Keep Existing Deck Template', 'Default Step 2 brand preset label must be Keep Existing Deck Template');
+
+// Preloaded sample deck: 2026 GDE Brand Guide (Keep Existing Deck Template, slide count matches the deck)
+const sampleDeckUrl = new URL('../2026-GDE-Brand-Guide-Distilled.pptx', import.meta.url);
+if (fs.existsSync(sampleDeckUrl)) {
+  const sampleBuf = fs.readFileSync(sampleDeckUrl);
+  const sampleFile = new File([sampleBuf], '2026-GDE-Brand-Guide-Distilled.pptx', {
+    type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  });
+  const parsedSample = await parseUploadedPptxFile(sampleFile);
+  const sampleSlideCount = parsedSample.extractedSlides.length;
+  assert.ok(sampleSlideCount >= 1, 'Must extract slides from the 2026 GDE Brand Guide sample deck');
+
+  // Verify the preloaded sample uses Keep Existing Deck Template, matches the deck's slide count, and is labelled as a sample
+  const sampleResult = applyDefaultSampleDeckToStudioState(parsedSample);
+  assert.equal(sampleResult.slideCount, sampleSlideCount, 'Preloaded sample must keep every slide of the Brand Guide deck');
+  assert.equal(sampleResult.brand.id, KEEP_EXISTING_BRAND_ID, 'Preloaded sample must use Keep Existing Deck Template');
+  const sampleSnap = getDeckStudioStateSnapshot();
+  assert.equal(sampleSnap.isSampleDeck, true, 'Preloaded sample deck must be labelled as a sample, not a user upload');
+  assert.equal(sampleSnap.sourceUploaded, false, 'Preloaded sample deck must keep sourceUploaded=false so it never masquerades as a user upload');
+  assert.equal(sampleSnap.targetSlideCount, sampleSlideCount, 'Target Slide Count must match the sample deck');
+
+  // Verify a user upload replaces the sample, keeps Keep Existing Deck Template, and matches the uploaded slide count
+  const uploadedStateResult = applyUploadedPptxDeckToStudioState(parsedSample);
+  assert.equal(uploadedStateResult.slideCount, sampleSlideCount, 'Uploading a PPTX must set slideCount to the deck slide count');
+  assert.equal(uploadedStateResult.brand.id, KEEP_EXISTING_BRAND_ID, 'Uploading a PPTX must keep Keep Existing Deck Template');
+  const afterUploadSnap = getDeckStudioStateSnapshot();
+  assert.equal(afterUploadSnap.isSampleDeck, false, 'A user upload must no longer be labelled as the sample deck');
+  assert.equal(afterUploadSnap.slideCount, sampleSlideCount, 'Studio state must hold every uploaded slide');
+  assert.equal(afterUploadSnap.targetSlideCount, sampleSlideCount, 'Target Slide Count must match the uploaded deck');
+  assert.equal(afterUploadSnap.brandId, KEEP_EXISTING_BRAND_ID, 'Studio state brandId must remain keep-existing-brand after upload');
+
+  // Target Slide Count must default to the uploaded deck's own slide count (24, 38, ...), with no upper limit
+  for (const uploadedCount of [24, 38]) {
+    const largerDeck = {
+      ...parsedSample,
+      fileName: `Talk-${uploadedCount}.pptx`,
+      extractedSlides: Array.from({ length: uploadedCount }, (_, i) => ({
+        ...structuredClone(parsedSample.extractedSlides[i % sampleSlideCount]),
+        title: `Uploaded Slide ${i + 1}`,
+      })),
+    };
+    const largerResult = applyUploadedPptxDeckToStudioState(largerDeck);
+    assert.equal(largerResult.slideCount, uploadedCount, `Uploading a ${uploadedCount}-slide deck must load all ${uploadedCount} slides`);
+    assert.equal(largerResult.brand.id, KEEP_EXISTING_BRAND_ID, `Uploading a ${uploadedCount}-slide deck must use Keep Existing Deck Template`);
+    const largerSnap = getDeckStudioStateSnapshot();
+    assert.equal(largerSnap.slideCount, uploadedCount, `Studio state must hold all ${uploadedCount} uploaded slides`);
+    assert.equal(largerSnap.targetSlideCount, uploadedCount, `Target Slide Count must default to ${uploadedCount} for a ${uploadedCount}-slide deck`);
+    assert.equal(largerSnap.pendingTargetSlideCount, uploadedCount, `Pending Target Slide Count must default to ${uploadedCount}`);
+  }
+
+  assert.equal(detectMarkdownSlideCount('## Slide A\n## Slide B\n## Slide C', 2), 3);
+
+  // Verify 24-slide markdown / Slide N outline is never cropped to 2 even if fallback/targetCount is 2
+  const md24H2 = Array.from({ length: 24 }, (_, i) => `## Slide ${i + 1}: Topic ${i + 1}\n- Bullet A${i + 1}\n- Bullet B${i + 1}`).join('\n\n');
+  assert.equal(detectMarkdownSlideCount(md24H2, 2), 24, 'detectMarkdownSlideCount must detect all 24 H2 slides');
+  const parsedMd24 = parseMarkdownIntoSlides(md24H2, 2, BRAND_PRESETS[0]);
+  assert.equal(parsedMd24.length, 24, 'parseMarkdownIntoSlides must preserve all 24 slides and never crop to 2');
+
+  const md24SlideLabels = Array.from({ length: 24 }, (_, i) => `Slide ${i + 1}: Keynote Section ${i + 1}\n- Point ${i + 1}`).join('\n\n');
+  assert.equal(detectMarkdownSlideCount(md24SlideLabels, 2), 24, 'detectMarkdownSlideCount must detect all 24 Slide N labels');
+  const parsedLabels24 = parseMarkdownIntoSlides(md24SlideLabels, 2, BRAND_PRESETS[0]);
+  assert.equal(parsedLabels24.length, 24, 'parseMarkdownIntoSlides must parse all 24 Slide N blocks without cropping');
+
+  // Verify table-only slides (<a:tbl> with empty <p:sp>) and grouped shapes (<p:grpSp>) parse cleanly without throwing
+  const rogueAiDeckUrl = new URL('../../Editor/Rogue AI.pptx', import.meta.url);
+  if (fs.existsSync(rogueAiDeckUrl)) {
+    const rogueBuf = fs.readFileSync(rogueAiDeckUrl);
+    const rogueFile = new File([rogueBuf], 'Rogue AI.pptx', {
+      type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    });
+    const parsedRogue = await parseUploadedPptxFile(rogueFile);
+    assert.equal(parsedRogue.extractedSlides.length, 19, 'Deck with table-only and grouped-shape slides must scan all 19 slides without crashing');
+  }
+
+  const gdeBrand = { ...BRAND_PRESETS[0] };
+  const convertedSlides = convertParsedPptxToBrandDeck(parsedSample, gdeBrand);
+  assert.equal(convertedSlides.length, sampleSlideCount, 'Must preserve every slide when converting to 2026 GDE Brand Guide');
+  assert.ok(convertedSlides.every((s) => s.title.trim().length > 0), 'Every converted sample slide must keep a title');
+  assert.ok(convertedSlides[0].cards.length > 0, 'Slide 1 body text must populate cards');
+
+  // Verify Keep Existing Deck Template option
+  const keepExistingBrand = buildKeepExistingBrandSpec(parsedSample, gdeBrand);
+  assert.equal(keepExistingBrand.id, KEEP_EXISTING_BRAND_ID, 'Keep Existing Brand preset must have id keep-existing-brand');
+  assert.equal(keepExistingBrand.name, 'Keep Existing Deck Template', 'Brand preset name must be Keep Existing Deck Template');
+  assert.equal(keepExistingBrand.templateStyle, 'keep-original', 'Keep Existing Deck Template must use keep-original templateStyle');
+
+  // Verify Slide Body Text formatting and editing round-trip
+  const firstCard = convertedSlides[0].cards[0];
+  const firstCardText = firstCard.heading || firstCard.bullets[0] || '';
+  const slide1Body = formatSlideBodyTextFromCards(convertedSlides[0]);
+  assert.ok(slide1Body.includes(firstCardText), 'Formatted slide body text must include slide content');
+  const updatedCards = parseSlideBodyTextIntoCards('Custom Point 1: Updated detail\nCustom Point 2: Second detail', convertedSlides[0].cards);
+  assert.equal(updatedCards.length, 2, 'Edited slide body text must parse into 2 cards');
+  assert.equal(updatedCards[0].heading, 'Custom Point 1');
+  assert.equal(updatedCards[0].bullets[0], 'Updated detail');
+
+  // Verify Merge Pairs parser ("Slide 1 and 5, Slide 10 and 12") and Merge / Remove deck helpers on a 24-slide deck
+  const longDeck = Array.from({ length: 24 }, (_, i) => ({
+    ...structuredClone(convertedSlides[i % convertedSlides.length]),
+    id: `slide-${i + 1}`,
+    sourceSlideNumber: i + 1,
+    title: `Sample Slide ${i + 1}`,
+  }));
+  const parsedPairs = parseMergePairsText('Slide 1 and 5, Slide 10 and 12', 24);
+  assert.deepEqual(parsedPairs, [
+    { firstSlideNumber: 1, secondSlideNumber: 5 },
+    { firstSlideNumber: 10, secondSlideNumber: 12 },
+  ]);
+  const mergedResult = mergeSlidePairsInDeck(longDeck, parsedPairs);
+  assert.equal(mergedResult.slides.length, 22, 'Merging 2 pairs (Slide 1&5, Slide 10&12) in a 24-slide deck must yield 22 slides');
+  assert.deepEqual(mergedResult.mergedDescriptions, ['Slide 1 + Slide 5', 'Slide 10 + Slide 12']);
+  assert.ok(mergedResult.slides[0].mergedFromSlideNumbers?.includes(5), 'Slide 1 must record mergedFromSlideNumbers [5]');
+
+  const removedResult = removeSlidesByIndicesInDeck(longDeck, [1, 3]);
+  assert.equal(removedResult.slides.length, 22, 'Removing 2 slides from a 24-slide deck must yield 22 slides');
+  assert.deepEqual(removedResult.removedSlideNumbers, [2, 4]);
+
+  // Verify Google Drive Upload Step 2 slide tab URL resolution
+  assert.equal(
+    resolveGoogleDriveSlideTabUrl({ id: '1AbC_SlideDeckId123', webViewLink: 'https://drive.google.com/file/d/1AbC_SlideDeckId123/view' }),
+    'https://docs.google.com/presentation/d/1AbC_SlideDeckId123/edit',
+    'Uploaded Google Drive presentation must resolve to docs.google.com/presentation/d/{id}/edit for new tab slide view',
+  );
+
+  // Verify Generating button seconds timer label formatting
+  assert.equal(
+    formatGeneratingTimerLabel('GENERATING DECK...', 0),
+    '⏳ GENERATING DECK... (0s)',
+  );
+  assert.equal(
+    formatGeneratingTimerLabel('Generating Photo with gemini-nano-banana-2.1...', 4),
+    '⏳ Generating Photo with gemini-nano-banana-2.1... (4s)',
+  );
+
+  // Verify Courier Code Snippet insertion in Keep Existing Deck Template OpenXML export
+  const slidesWithCode = convertedSlides.map((s, idx) =>
+    idx === 0 ? { ...s, codeSnippet: 'const agent = new Agent({ model: "gemini-4-argon" });' } : s,
+  );
+  const keepOriginalOut = compileOpenXmlPptx({
+    productName: 'GDE Deck Studio',
+    deckTitle: convertedSlides[0].title,
+    deckSubtitle: keepExistingBrand.name,
+    presenterName: 'Andre Sara',
+    gdeCategory: 'Cloud & AI GDE',
+    brand: keepExistingBrand,
+    slides: slidesWithCode,
+    sourceZipEntries: parsedSample.rawZipEntries,
+  });
+  const keepOriginalAscii = new TextDecoder('latin1').decode(keepOriginalOut);
+  assert.ok(keepOriginalAscii.includes('Courier New'), 'Compiled PPTX with codeSnippet must render code in Courier New font');
+  assert.ok(keepOriginalAscii.includes('const agent = new Agent'), 'Compiled PPTX must contain the pasted code snippet text');
+
+  // Verify Add New Slide inserts immediately after current slide
+  const afterSlide1 = insertNewSlideAfterIndex(convertedSlides, 0, gdeBrand);
+  assert.equal(afterSlide1.insertedIndex, 1, 'Adding new slide on Slide 1 (idx 0) must insert at idx 1 (Slide 2)');
+  assert.equal(afterSlide1.slides.length, sampleSlideCount + 1, 'Deck length must increase by one');
+  assert.equal(afterSlide1.slides[0].title, convertedSlides[0].title, 'Original Slide 1 must remain at idx 0');
+  assert.equal(afterSlide1.slides[1].title, 'New Slide 2', 'Newly inserted slide must be at idx 1');
+
+  const compiledOut = compileOpenXmlPptx({
+    productName: 'GDE Deck Studio',
+    deckTitle: convertedSlides[0].title,
+    deckSubtitle: gdeBrand.name,
+    presenterName: 'Andre Sara',
+    gdeCategory: 'Cloud & AI GDE',
+    brand: gdeBrand,
+    slides: convertedSlides,
+  });
+  const compiledAscii = new TextDecoder('latin1').decode(compiledOut);
+  assert.ok(!compiledAscii.includes('&lt;a:'), 'Compiled PPTX must contain zero leaked XML tags');
+  assert.ok(compiledAscii.includes('20344B'), 'Compiled PPTX must apply #20344B Grounding Navy');
+  assert.ok(compiledAscii.includes('FF7DAF'), 'Compiled PPTX must apply #FF7DAF Halftone Pink');
+}
+
+console.log('✅ All GDE Pulse live quiz, modular Travel Planner, WorkTrips checklist, $600/$800/$1,200 budget, overlap, Advocu My Events parser, Advocu OpenCFP feed & URL resolution, Speaker Matching session suggestions, Schema-Locked SQL/Agent engine, Discover region & clash filter, ±21-day reimbursement, and 5 distinct OpenXML Deck Studio template checks passed!');

@@ -445,9 +445,9 @@ export function renderPulseHostModule(): void {
   container.innerHTML = `
     <div class="pulse-host-shell">
       <!-- TOP BANNER: SHORT URL & SAVED QUIZZES -->
-      <section class="card pulse-config-hero">
-        <div class="pulse-config-hero-top">
-          <div class="pulse-config-hero-brand">
+      <section class="card pulse-config-banner">
+        <div class="pulse-config-banner-top">
+          <div class="pulse-config-banner-brand">
             ${PULSE_VECTOR_SVG}
             <div>
               <span class="eyebrow">GDE Pulse &middot; Interactive Workshop Quiz</span>
@@ -458,7 +458,7 @@ export function renderPulseHostModule(): void {
               </p>
             </div>
           </div>
-          <div class="pulse-config-hero-actions">
+          <div class="pulse-config-banner-actions">
             <button type="button" class="btn btn-secondary btn-sm" data-pulse-action="new-quiz">
               + New Blank Quiz
             </button>

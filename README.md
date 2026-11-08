@@ -25,3 +25,17 @@ Run tests and build:
 npm test
 npm run build
 ```
+
+## Android Installation Guide
+
+GDE Pulse ships as an installable Progressive Web App (PWA) so GDEs get a standalone home-screen app without sideloading an APK:
+
+1. Open [gde.web.app](https://gde.web.app) (or [gpulse.web.app](https://gpulse.web.app) for quiz participants) in **Chrome on Android**.
+2. Tap the browser menu (**⋮**) in the top-right corner.
+3. Tap **Add to Home screen** / **Install app** and confirm.
+4. Launch **GDE Pulse** from your Android home screen or app drawer.
+
+## Open Source & Contributing
+
+Source code is open under the [MIT License](./LICENSE) at [github.com/andresara-cloud/gde-pulse](https://github.com/andresara-cloud/gde-pulse). Fork the repository, create a feature branch, run `npm test`, and open a pull request to contribute.
+

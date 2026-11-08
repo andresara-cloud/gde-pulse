@@ -29,20 +29,20 @@
     <!-- =================================================================== -->
     <main id="welcomeView" class="welcome-shell" hidden>
       <div class="welcome-card">
-        <div class="welcome-hero-banner">
+        <div class="welcome-top-banner">
           <img
-            src="/gde-hero.jpg"
+            src="/gde-banner.jpg"
             alt="Google Developer Experts — GDE Pulse"
-            class="welcome-hero-img"
+            class="welcome-top-img"
             fetchpriority="high"
           />
         </div>
 
-        <div class="welcome-heroes-showcase">
+        <div class="welcome-community-showcase">
           <img
-            src="/GDE-Heroes.png"
+            src="/gde-community.png"
             alt="Google Developer Experts traveling across the globe"
-            class="welcome-heroes-img"
+            class="welcome-community-img"
             fetchpriority="high"
           />
         </div>
@@ -51,7 +51,7 @@
           <div class="brand-motif-tag" aria-hidden="true">Google Developer Experts &middot; 2026</div>
           <h1 class="welcome-title">GDE Pulse</h1>
           <p class="welcome-subtitle">
-            Run interactive live workshop quizzes at <strong>gpulse.web.app</strong> with real-time participant queues and leaderboards — plus optional DevFest &amp; Build with AI Travel Planner, WorkTrips, and Advocu reporting.
+            Sign in with your Google GDE account to launch <strong>GDE Pulse (Quiz)</strong> at <strong>gpulse.web.app</strong>, manage events in <strong>Travel Planner</strong>, or build native 16:9 PowerPoint presentations in <strong>GDE Deck Studio</strong>.
           </p>
 
           <div class="welcome-actions">
@@ -65,6 +65,41 @@
               Sign in with Google GDE Account
             </button>
           </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- =================================================================== -->
+    <!-- VIEW 1B: GDE ACCESS CHECK (DIRECTORY VALIDATION / ASK FOR ACCESS)    -->
+    <!-- =================================================================== -->
+    <main id="accessView" class="welcome-shell" data-access-state="checking" hidden>
+      <div class="welcome-card">
+        <div class="welcome-body access-body" role="status" aria-live="polite">
+          <h1 class="welcome-title access-title" id="accessTitle">Checking your GDE status…</h1>
+          <p class="welcome-subtitle" id="accessMessage">Looking you up in the GDE directory.</p>
+
+          <form id="accessRequestForm" class="access-form" hidden>
+            <label class="field">
+              <span>GDE profile link (optional)</span>
+              <input
+                type="url"
+                id="accessProfileLink"
+                maxlength="300"
+                placeholder="https://me.developers.google.com/u/…"
+                autocomplete="url"
+              />
+            </label>
+            <button type="submit" id="btnRequestAccess" class="btn btn-primary btn-lg btn-full">
+              Ask for access
+            </button>
+          </form>
+
+          <button type="button" id="btnAccessRetry" class="btn btn-primary btn-lg btn-full" hidden>
+            Retry
+          </button>
+          <button type="button" id="btnAccessSignOut" class="btn btn-ghost btn-full">
+            Use another account
+          </button>
         </div>
       </div>
     </main>
@@ -118,12 +153,23 @@
         </div>
 
         <div class="topbar-actions">
+          <button
+            type="button"
+            id="btnOpenLaunchpadHub"
+            class="btn btn-ghost btn-sm"
+            title="Return to 3-Module Launchpad"
+          >
+            ⊞ Modules
+          </button>
           <div class="module-switcher" id="headerModuleSwitcher" role="tablist" aria-label="Workspace Modules">
             <button type="button" class="module-switch-btn active" data-workspace-module="pulse" role="tab" aria-selected="true">
-              ⚡ Live Quiz
+              ⚡ GDE Pulse (Quiz)
             </button>
             <button type="button" class="module-switch-btn" id="btnSwitchModuleTravel" data-workspace-module="travel" role="tab" aria-selected="false">
               ✈️ Travel Planner
+            </button>
+            <button type="button" class="module-switch-btn" id="btnSwitchModuleDeck" data-workspace-module="deck" role="tab" aria-selected="false">
+              🎬 GDE Deck Studio
             </button>
           </div>
           <button type="button" id="btnOpenAddEvent" class="btn btn-primary btn-sm" hidden>
@@ -585,11 +631,80 @@
     </main>
 
     <!-- =================================================================== -->
-    <!-- VIEW 3: GDE PULSE MODULAR DASHBOARD (LIVE QUIZ + TRAVEL PLANNER)    -->
+    <!-- VIEW 2A: POST-SIGN-IN 3-MODULE LAUNCHPAD                            -->
+    <!-- =================================================================== -->
+    <main id="launchpadView" class="container launchpad-shell" hidden>
+      <section class="launchpad-banner" aria-labelledby="launchpadHeading">
+        <span class="eyebrow">Google Developer Experts &middot; Workspace Hub</span>
+        <h1 id="launchpadHeading" class="launchpad-title">Select Your GDE Module</h1>
+        <p class="muted launchpad-subtitle">
+          Choose one of the three flagship GDE modules below to get started.
+        </p>
+
+        <div class="launchpad-grid" role="list">
+          <!-- OPTION 1: GDE PULSE (QUIZ) -->
+          <button
+            type="button"
+            class="card launchpad-card launchpad-card-blue"
+            data-launch-module="pulse"
+            role="listitem"
+          >
+            <div class="launchpad-card-top">
+              <span class="launchpad-icon" aria-hidden="true">⚡</span>
+              <span class="chip chip-blue">gpulse.web.app</span>
+            </div>
+            <h2 class="launchpad-card-title">GDE Pulse (Quiz)</h2>
+            <p class="launchpad-card-desc">
+              Host interactive live workshop and keynote quizzes with real-time participant queues, QR code join, and instant leaderboards.
+            </p>
+          </button>
+
+          <!-- OPTION 2: TRAVEL PLANNER -->
+          <button
+            type="button"
+            class="card launchpad-card launchpad-card-amber"
+            data-launch-module="travel"
+            role="listitem"
+          >
+            <div class="launchpad-card-top">
+              <span class="launchpad-icon" aria-hidden="true">✈️</span>
+              <span class="chip chip-neutral">CFPs &middot; WorkTrips &middot; Advocu</span>
+            </div>
+            <h2 class="launchpad-card-title">Travel Planner</h2>
+            <p class="launchpad-card-desc">
+              Manage DevFest &amp; Build with AI itineraries, discover Advocu Open CFPs, track WorkTrips approvals, and monitor 21-day reimbursements.
+            </p>
+          </button>
+
+          <!-- OPTION 3: GDE DECK STUDIO (GDE STAGE) -->
+          <button
+            type="button"
+            class="card launchpad-card launchpad-card-green"
+            data-launch-module="deck"
+            role="listitem"
+          >
+            <div class="launchpad-card-top">
+              <span class="launchpad-icon" aria-hidden="true">🎬</span>
+              <span class="chip chip-blue">Edit or Update Slides</span>
+            </div>
+            <h2 class="launchpad-card-title">GDE Deck Studio</h2>
+            <p class="launchpad-card-desc">
+              Create or update decks from Markdown or existing slides, with the option to change templates or insert AI-generated media.
+            </p>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <!-- =================================================================== -->
+    <!-- VIEW 3: GDE PULSE MODULAR DASHBOARD (QUIZ + TRAVEL + DECK STUDIO)   -->
     <!-- =================================================================== -->
     <main id="dashboardView" class="container dashboard-shell" hidden>
-      <!-- MODULE 1: GDE PULSE LIVE WORKSHOP QUIZ (DEFAULT PRIMARY MODULE) -->
+      <!-- MODULE 1: GDE PULSE LIVE WORKSHOP QUIZ -->
       <div id="pulseHostModuleContainer"></div>
+
+      <!-- MODULE 3: GDE DECK STUDIO (GDE STAGE OPENXML PPTX & VIDEO CREATOR) -->
+      <div id="deckStudioModuleContainer" hidden></div>
 
       <!-- MODULE 2: OPTIONAL TRAVEL PLANNER MODULE -->
       <div id="travelPlannerModuleContainer" hidden>
@@ -667,16 +782,48 @@
         <div id="itineraryCalendar" class="calendar-view-container" hidden></div>
       </section>
 
-      <!-- TAB 2: DISCOVER EVENTS & COMMUNITIES -->
+      <!-- TAB 2: DISCOVER ADVOCU OPEN CFPS -->
       <section id="tab-discover" class="tab-panel" hidden>
         <div class="discover-toolbar card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span class="chip chip-blue">Advocu Speaker Matching &amp; Open CFPs</span>
+              <span id="advocuSessionStatusChip" class="chip chip-neutral">Checking Advocu session...</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button type="button" id="btnToggleAdvocuSessionBox" class="btn btn-secondary btn-sm">
+                Refresh Advocu Session Token
+              </button>
+            </div>
+          </div>
+
+          <div id="advocuSessionRefreshBox" class="url-autofill-box" style="margin-bottom:14px" hidden>
+            <div class="step-badge-row">
+              <span class="step-pill">Advocu Keycloak Session (`advocu-refresh-token`)</span>
+              <span id="advocuSessionStatusBanner" class="muted-sm">
+                Shared with AI Janise in GCP Secret Manager (`projects/andresara/secrets/advocu-refresh-token`)
+              </span>
+            </div>
+            <div class="advocu-key-row">
+              <input
+                type="password"
+                id="advocuRefreshTokenInput"
+                placeholder="Paste fresh Advocu refresh_token or token JSON from app.advocu.com..."
+                autocomplete="off"
+              />
+              <button type="button" id="btnSaveAdvocuRefreshToken" class="btn btn-primary btn-sm">
+                Verify &amp; Rotate Token
+              </button>
+            </div>
+          </div>
+
           <div class="form-row-2">
             <label class="field">
-              <span>Search Events, Conferences &amp; Communities</span>
+              <span>Search Advocu Open CFPs &amp; Events</span>
               <input
                 type="search"
                 id="discoverSearch"
-                placeholder="Search city, country, topic, or conference..."
+                placeholder="Search city, country, chapter, topic, or DevFest..."
               />
             </label>
             <label class="field">
@@ -694,11 +841,11 @@
             </label>
           </div>
           <div class="filter-pills" id="discoverSourceFilters" style="margin-top:12px">
-            <button type="button" class="pill active" data-discover-source="ALL">All Events &amp; Communities</button>
-            <button type="button" class="pill" data-discover-source="EMEA Conference">EMEA Conferences &amp; CFPs</button>
-            <button type="button" class="pill" data-discover-source="Non-GDG Community">Non-GDG Communities</button>
-            <button type="button" class="pill" data-discover-source="Live GDG">Live GDG &amp; DevFests</button>
-            <button type="button" class="pill" data-discover-source="EMEA GDG Chapter">EMEA GDG Chapters</button>
+            <button type="button" class="pill active" data-discover-source="ALL">All Advocu Open CFPs</button>
+            <button type="button" class="pill" data-discover-source="DevFest">DevFests</button>
+            <button type="button" class="pill" data-discover-source="Build with AI">Build with AI</button>
+            <button type="button" class="pill" data-discover-source="I/O Extended">I/O Extended</button>
+            <button type="button" class="pill" data-discover-source="GDG">GDG &amp; Community</button>
           </div>
         </div>
 
@@ -737,7 +884,7 @@
             <input
               type="text"
               id="evEventUrl"
-              placeholder="Paste Sessionize, GDG, DevFest, or conference URL (https://...)"
+              placeholder="Paste Advocu, Sessionize, GDG, DevFest, or conference URL (https://...)"
               autocomplete="off"
             />
             <button type="button" id="btnAutoFillEventUrl" class="btn btn-secondary">
@@ -757,7 +904,7 @@
               type="text"
               id="evSessionTitle"
               list="advocuSessionsDatalist"
-              placeholder="e.g. Democratising AI: Ethical and Responsible Development"
+              placeholder="e.g. Building Agents with Gemini: From Prototype to Production"
             />
             <datalist id="advocuSessionsDatalist"></datalist>
           </label>
