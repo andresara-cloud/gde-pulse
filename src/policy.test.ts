@@ -741,6 +741,26 @@ if (fs.existsSync(sampleDeckUrl)) {
     assert.equal(parsedRogue.extractedSlides.length, 19, 'Deck with table-only and grouped-shape slides must scan all 19 slides without crashing');
   }
 
+  // Verify HeaderBox + PillarCard_1..3 slides preserve HeaderBox title/subtitle instead of PillarCard_1 metric
+  const veggieDistilledPath = '/Users/andresara/Downloads/Veggie-Hero-Brand-Guide-Distilled.pptx';
+  if (fs.existsSync(veggieDistilledPath)) {
+    const veggieBuf = fs.readFileSync(veggieDistilledPath);
+    const veggieFile = new File([veggieBuf], 'Veggie-Hero-Brand-Guide-Distilled.pptx', {
+      type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    });
+    const parsedVeggie = await parseUploadedPptxFile(veggieFile);
+    assert.equal(
+      parsedVeggie.extractedSlides[0].title,
+      'Making Veggie Hero a Self-Funding National Movement',
+      'HeaderBox must win over PillarCard_1 metric as the slide title',
+    );
+    assert.equal(
+      parsedVeggie.extractedSlides[0].bullets.length,
+      3,
+      'Three PillarCard shapes must map to 3 structured card bullets without footer/header noise',
+    );
+  }
+
   const gdeBrand = { ...BRAND_PRESETS[0] };
   const convertedSlides = convertParsedPptxToBrandDeck(parsedSample, gdeBrand);
   assert.equal(convertedSlides.length, sampleSlideCount, 'Must preserve every slide when converting to 2026 GDE Brand Guide');

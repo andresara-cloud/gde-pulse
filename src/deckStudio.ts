@@ -1409,7 +1409,11 @@ export function applyUploadedPptxDeckToStudioState(parsed: ParsedPptxResult): {
   studioState.sourceUploaded = true;
   studioState.isSampleDeck = false;
   studioState.hasUserModifiedSlides = false;
-  studioState.sourceLabel = `${parsed.fileName} (${detectedSlideCount} slides)`;
+  const isDistilledGuideFile =
+    detectedSlideCount === 2 && /distilled/i.test(parsed.fileName);
+  studioState.sourceLabel = isDistilledGuideFile
+    ? `${parsed.fileName} (${detectedSlideCount} slides in this Distilled Brand Guide .PPTX file)`
+    : `${parsed.fileName} (${detectedSlideCount} slides)`;
   studioState.lastLlmPrompt = formatSlidesAsLlmPrompt(convertedSlides);
   studioState.lastVqaSummary = `Uploaded "${parsed.fileName}" (${detectedSlideCount} slides) · Keep Existing Deck Template.`;
 

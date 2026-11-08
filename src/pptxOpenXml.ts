@@ -1249,8 +1249,10 @@ export async function parseUploadedPptxFile(file: File): Promise<ParsedPptxResul
 
     // Extract text shapes (<p:sp>) with position, font size, placeholder type, and occlusion filtering
     interface ParsedShapeText {
+      cNvName: string;
       phType: string;
       maxSz: number;
+      firstParaSz: number;
       y: number;
       x: number;
       paragraphs: string[];
@@ -1259,6 +1261,19 @@ export async function parseUploadedPptxFile(file: File): Promise<ParsedPptxResul
     for (const el of treeElements) {
       if (el.tag !== 'p:sp') continue;
       const spBody = el.body;
+      const cNvM = /<p:cNvPr\b[^>]*\bname="([^"]*)"/i.exec(spBody);
+      const cNvName = cNvM ? cNvM[1].trim() : '';
+      if (
+        cNvName === 'SlideFooter' ||
+        cNvName === 'SlideBackground' ||
+        cNvName === 'BrandDividerLine' ||
+        cNvName === 'TopRightSectionPill' ||
+        cNvName === 'EyebrowBar' ||
+        cNvName === 'ExecutiveTakeawayBanner'
+      ) {
+        continue;
+      }
+
       const phM = /<p:ph\b([^>]*)\/?>/i.exec(spBody);
       let phType = '';
       if (phM) {
@@ -1276,6 +1291,17 @@ export async function parseUploadedPptxFile(file: File): Promise<ParsedPptxResul
       const y = offM ? parseInt(offM[2], 10) : 99999999;
       const cx = extM ? parseInt(extM[1], 10) : 2000000;
       const cy = extM ? parseInt(extM[2], 10) : 600000;
+
+      // Skip slide footers, top eyebrow chrome bars, and corner section pills
+      const joinedParas = paras.join(' ').trim();
+      if (y >= 6100000 && /\|\s*Slide\s+\d+\s+of\s+\d+/i.test(joinedParas)) continue;
+      if (y < 600000 && /^<\s*>\s*Google Developer Experts\s*\/\//i.test(joinedParas)) continue;
+      if (y < 550000 && x < 2500000 && paras.length === 1 && /^SLIDE\s+\d+\s*\|/i.test(paras[0])) {
+        continue;
+      }
+      if (y < 550000 && x > 7500000 && paras.length <= 2 && joinedParas.length <= 36) {
+        continue;
+      }
 
       // Skip shapes that are occluded (>75%) by a later full-slide picture (e.g. Slide 3 old title underneath McKinsey chart)
       if (x < 90000000 && y < 90000000) {
@@ -1299,7 +1325,23 @@ export async function parseUploadedPptxFile(file: File): Promise<ParsedPptxResul
             ? 2400
             : 1400;
 
-      parsedShapes.push({ phType, maxSz, y, x, paragraphs: paras });
+      // Measure the font size of the first non-empty paragraph so a body card with a large
+      // secondary stat metric (e.g. sz=2600 on paragraph 2) does not outrank the slide header.
+      let firstParaSz = maxSz;
+      const pBlocks = spBody.match(/<a:p(?:\s[^>]*)?>[\s\S]*?<\/a:p>/gi) || [];
+      for (const pBlock of pBlocks) {
+        if (extractCleanParagraphsFromXmlBlock(pBlock).length > 0) {
+          const pSzMatches = Array.from(pBlock.matchAll(/\bsz="(\d+)"/gi)).map((m) =>
+            parseInt(m[1], 10)
+          );
+          if (pSzMatches.length > 0) {
+            firstParaSz = Math.max(...pSzMatches);
+          }
+          break;
+        }
+      }
+
+      parsedShapes.push({ cNvName, phType, maxSz, firstParaSz, y, x, paragraphs: paras });
     }
 
     // Extract table rows (<a:tbl> inside <p:graphicFrame>)
@@ -1338,19 +1380,22 @@ export async function parseUploadedPptxFile(file: File): Promise<ParsedPptxResul
         bullets.push(rowStr);
       }
     } else {
+      const headerBoxShape = parsedShapes.find((s) => s.cNvName === 'HeaderBox');
       const titlePlaceholders = parsedShapes.filter(
         (s) => s.phType === 'title' || s.phType === 'ctrTitle'
       );
       let primaryTitleShape: ParsedShapeText;
-      if (titlePlaceholders.length > 0) {
-        titlePlaceholders.sort((a, b) => b.maxSz - a.maxSz || a.y - b.y || a.x - b.x);
+      if (headerBoxShape) {
+        primaryTitleShape = headerBoxShape;
+      } else if (titlePlaceholders.length > 0) {
+        titlePlaceholders.sort((a, b) => b.firstParaSz - a.firstParaSz || a.y - b.y || a.x - b.x);
         primaryTitleShape = titlePlaceholders[0];
       } else {
         const topCandidates = [...parsedShapes].sort((a, b) => {
-          const aTop = a.y < 1600000 ? 0 : 1;
-          const bTop = b.y < 1600000 ? 0 : 1;
+          const aTop = a.y < 1150000 ? 0 : 1;
+          const bTop = b.y < 1150000 ? 0 : 1;
           if (aTop !== bTop) return aTop - bTop;
-          if (b.maxSz !== a.maxSz) return b.maxSz - a.maxSz;
+          if (b.firstParaSz !== a.firstParaSz) return b.firstParaSz - a.firstParaSz;
           return a.y - b.y || a.x - b.x;
         });
         primaryTitleShape = topCandidates[0];
@@ -1405,6 +1450,12 @@ export async function parseUploadedPptxFile(file: File): Promise<ParsedPptxResul
         for (const sh of remainingShapes) {
           if (sh.phType === 'subTitle' && !slideSubtitle && sh.paragraphs.length === 1) {
             slideSubtitle = sh.paragraphs[0];
+            continue;
+          }
+          if (/^PillarCard_\d+$/i.test(sh.cNvName) && sh.paragraphs.length >= 3) {
+            const cardHeading = sh.paragraphs[2] || sh.paragraphs[0];
+            const cardBody = sh.paragraphs.slice(3).join(' · ').trim();
+            bullets.push(cardBody ? `${cardHeading}: ${cardBody}` : cardHeading);
             continue;
           }
           if (

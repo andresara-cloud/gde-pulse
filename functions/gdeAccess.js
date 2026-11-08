@@ -38,8 +38,6 @@ const SMTP_USER = process.env.GDE_SMTP_USER || DEFAULT_PRIMARY_ADMIN;
 const APP_BASE_URL = (process.env.GDE_APP_BASE_URL || 'https://gde.web.app').replace(/\/$/, '');
 const DECISION_LINK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const REQUEST_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-// Users whose gde_users profile existed before access control went live keep their access.
-const GRANDFATHER_CUTOFF_MS = Date.parse('2026-11-09T00:00:00Z');
 const SECRET_NAMES = ['GDE_ACCESS_SIGNING_KEY'];
 
 const GENERIC_EMAIL_DOMAINS = new Set([
@@ -476,16 +474,12 @@ async function handleCheck(decoded, body, ctx) {
     return { status: 'approved' };
   }
 
-  if (existing && ['approved', 'validated', 'blocked'].includes(existing.status)) {
+  if (
+    existing &&
+    ['approved', 'validated', 'blocked'].includes(existing.status) &&
+    existing.method !== 'grandfathered'
+  ) {
     return { status: existing.status };
-  }
-
-  if (!existing) {
-    const createdMs = userSnap.exists && userSnap.createTime ? userSnap.createTime.toMillis() : NaN;
-    if (Number.isFinite(createdMs) && createdMs < GRANDFATHER_CUTOFF_MS) {
-      await ref.set({ ...base, status: 'approved', method: 'grandfathered', decidedAt: now });
-      return { status: 'approved' };
-    }
   }
 
   let match = null;
